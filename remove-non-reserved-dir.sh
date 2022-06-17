@@ -6,14 +6,11 @@ ROOT=`dirname "$0"`
 ROOT=`cd "$ROOT"; pwd`
 
 reserved=(
-branch-0.11
-branch-0.12
-branch-0.13
-branch-0.14
-branch-0.15
 0.15
 1.0
-incubator-doris
+assets
+zh-CN
+doris
 remove-non-reserved-dir.sh
 versions.json
 .asf.yaml
@@ -43,3 +40,4 @@ do
         rm -rf $ROOT/$file
     fi
 done
+

@@ -8,6 +8,7 @@ ROOT=`cd "$ROOT"; pwd`
 reserved=(
 0.15
 1.0
+1.1
 assets
 zh-CN
 doris

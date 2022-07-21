@@ -6,12 +6,7 @@ ROOT=`dirname "$0"`
 ROOT=`cd "$ROOT"; pwd`
 
 reserved=(
-0.15
-1.0
-1.1
-assets
-zh-CN
-doris
+build
 remove-non-reserved-dir.sh
 versions.json
 .asf.yaml

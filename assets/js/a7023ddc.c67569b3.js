@@ -1,1 +1,0 @@
-"use strict";(self.webpackChunkselectdb_portal=self.webpackChunkselectdb_portal||[]).push([[11713],{53457:e=>{e.exports=JSON.parse('[{"label":"Best Practice","permalink":"/blog/tags/best-practice","count":3},{"label":"Release Notes","permalink":"/blog/tags/release-notes","count":3},{"label":"Top News","permalink":"/blog/tags/top-news","count":1}]')}}]);

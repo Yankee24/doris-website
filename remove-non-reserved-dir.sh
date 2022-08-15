@@ -34,7 +34,11 @@ do
     if [ $(contains "${reserved[@]}" "$file") == "n" ]; then
         echo "delete $ROOT/$file"
         if [ $file != "remove-non-reserved-dir.sh"]; then
-           rm -rf $ROOT/$file
+           if [ [ $FILE =~ "remove-non-reserved-dir.sh" ] ]; then
+              echo "cannot delete $ROOT/$file"
+           else
+             rm -rf $ROOT/$file
+           fi
         fi
     fi
 done

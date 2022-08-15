@@ -33,6 +33,8 @@ for file in `ls -a $ROOT`
 do
     if [ $(contains "${reserved[@]}" "$file") == "n" ]; then
         echo "delete $ROOT/$file"
-        rm -rf $ROOT/$file
+        if [ $file != "remove-non-reserved-dir.sh"]; then
+           rm -rf $ROOT/$file
+        fi
     fi
 done

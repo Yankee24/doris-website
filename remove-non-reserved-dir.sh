@@ -8,7 +8,6 @@ ROOT=`cd "$ROOT"; pwd`
 reserved=(
 build
 remove-non-reserved-dir.sh
-versions.json
 .asf.yaml
 .nojekyll
 .git
@@ -32,13 +31,6 @@ function contains() {
 for file in `ls -a $ROOT`
 do
     if [ $(contains "${reserved[@]}" "$file") == "n" ]; then
-        echo "delete $ROOT/$file"
-        if [ $file != "remove-non-reserved-dir.sh"]; then
-           if [ [ $FILE =~ "remove-non-reserved-dir.sh" ] ]; then
-              echo "cannot delete $ROOT/$file"
-           else
-             rm -rf $ROOT/$file
-           fi
-        fi
+         rm -rf $ROOT/$file
     fi
 done

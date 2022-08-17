@@ -14,32 +14,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
-github:
-  description: Apache Doris Website
-  homepage: https://doris.apache.org/
-  labels:
-    - data-warehousing
-    - mpp
-    - olap
-    - dbms
-    - apache
-    - doris
-    - database
-    - distributed-system
-    - big-data
-    - iceberg
-    - hudi
-    - datalake
-    - hive
-    - hadoop
-    - analytics
-    - tpch
-    - ssb
-    - vectorized
-  enabled_merge_buttons:
-    squash:  true
-    merge:   false
-    rebase:  false
-notifications:
-  pullrequests_status:  commits@doris.apache.org
+publish:
+  whoami: asf-site

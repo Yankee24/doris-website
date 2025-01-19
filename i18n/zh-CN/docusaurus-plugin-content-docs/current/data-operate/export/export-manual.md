@@ -1,6 +1,6 @@
 ---
 {
-    "title": "数据导出",
+    "title": "Export",
     "language": "zh-CN"
 }
 ---
@@ -24,203 +24,379 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# 数据导出
+本文档将介绍如何使用`EXPORT`命令导出 Doris 中存储的数据。
 
-数据导出（Export）是 Doris 提供的一种将数据导出的功能。该功能可以将用户指定的表或分区的数据，以文本的格式，通过 Broker 进程导出到远端存储上，如 HDFS / 对象存储（支持S3协议） 等。
+`Export` 是 Doris 提供的一种将数据异步导出的功能。该功能可以将用户指定的表或分区的数据，以指定的文件格式，导出到目标存储系统中，包括对象存储、HDFS 或本地文件系统。
 
-本文档主要介绍 Export 的基本原理、使用方式、最佳实践以及注意事项。
+`Export` 是一个异步执行的命令，命令执行成功后，立即返回结果，用户可以通过`Show Export` 命令查看该 Export 任务的详细信息。
 
-## 原理
+有关`EXPORT`命令的详细介绍，请参考：[EXPORT](../../sql-manual/sql-statements/data-modification/load-and-export/EXPORT)
 
-用户提交一个 Export 作业后。Doris 会统计这个作业涉及的所有 Tablet。然后对这些 Tablet 进行分组，每组生成一个特殊的查询计划。该查询计划会读取所包含的 Tablet 上的数据，然后通过 Broker 将数据写到远端存储指定的路径中，也可以通过S3协议直接导出到支持S3协议的远端存储上。
+关于如何选择 `SELECT INTO OUTFILE` 和 `EXPORT`，请参阅 [导出综述](../../data-operate/export/export-overview.md)。
 
-总体的调度方式如下:
+## 适用场景
 
-```
-+--------+
-| Client |
-+---+----+
-    |  1. Submit Job
-    |
-+---v--------------------+
-| FE                     |
-|                        |
-| +-------------------+  |
-| | ExportPendingTask |  |
-| +-------------------+  |
-|                        | 2. Generate Tasks
-| +--------------------+ |
-| | ExportExporingTask | |
-| +--------------------+ |
-|                        |
-| +-----------+          |     +----+   +------+   +---------+
-| | QueryPlan +----------------> BE +--->Broker+--->         |
-| +-----------+          |     +----+   +------+   | Remote  |
-| +-----------+          |     +----+   +------+   | Storage |
-| | QueryPlan +----------------> BE +--->Broker+--->         |
-| +-----------+          |     +----+   +------+   +---------+
-+------------------------+         3. Execute Tasks
+`Export` 适用于以下场景：
 
-```
+- 大数据量的单表导出、仅需简单的过滤条件。
+- 需要异步提交任务的场景。
 
-1. 用户提交一个 Export 作业到 FE。
-2. FE 的 Export 调度器会通过两阶段来执行一个 Export 作业：
-  1. PENDING：FE 生成 ExportPendingTask，向 BE 发送 snapshot 命令，对所有涉及到的 Tablet 做一个快照。并生成多个查询计划。
-  2. EXPORTING：FE 生成 ExportExportingTask，开始执行查询计划。
+使用 `Export` 时需要注意以下限制：
 
-### 查询计划拆分
+- 当前不支持文本文件压缩格式的导出。
+- 不支持 Select 结果集导出。若需要导出 Select 结果集，请使用[OUTFILE 导出](../../data-operate/export/outfile.md)
 
-Export 作业会生成多个查询计划，每个查询计划负责扫描一部分 Tablet。每个查询计划扫描的 Tablet 个数由 FE 配置参数 `export_tablet_num_per_task` 指定，默认为 5。即假设一共 100 个 Tablet，则会生成 20 个查询计划。用户也可以在提交作业时，通过作业属性 `tablet_num_per_task` 指定这个数值。
-
-一个作业的多个查询计划顺序执行。
-
-### 查询计划执行
-
-一个查询计划扫描多个分片，将读取的数据以行的形式组织，每 1024 行为一个 batch，调用 Broker 写入到远端存储上。
-
-查询计划遇到错误会整体自动重试 3 次。如果一个查询计划重试 3 次依然失败，则整个作业失败。
-
-Doris 会首先在指定的远端存储的路径中，建立一个名为 `__doris_export_tmp_12345` 的临时目录（其中 `12345` 为作业 id）。导出的数据首先会写入这个临时目录。每个查询计划会生成一个文件，文件名示例：
-
-`export-data-c69fcf2b6db5420f-a96b94c1ff8bccef-1561453713822`
-
-其中 `c69fcf2b6db5420f-a96b94c1ff8bccef` 为查询计划的 query id。`1561453713822` 为文件生成的时间戳。
-
-当所有数据都导出后，Doris 会将这些文件 rename 到用户指定的路径中。
-
-### Broker 参数
-
-Export 需要借助 Broker 进程访问远端存储，不同的 Broker 需要提供不同的参数，具体请参阅 [Broker文档](../../advanced/broker.md)
-
-## 开始导出
-
-Export 的详细用法可参考 [SHOW EXPORT](../../sql-manual/sql-reference/Show-Statements/SHOW-EXPORT.md) 。
-
-### 导出到HDFS
+## 快速上手
+### 建表与导入数据
 
 ```sql
-EXPORT TABLE db1.tbl1 
-PARTITION (p1,p2)
-[WHERE [expr]]
-TO "hdfs://host/path/to/export/" 
-PROPERTIES
-(
-    "label" = "mylabel",
-    "column_separator"=",",
-    "columns" = "col1,col2",
-    "exec_mem_limit"="2147483648",
-    "timeout" = "3600"
+CREATE TABLE IF NOT EXISTS tbl (
+    `c1` int(11) NULL,
+    `c2` string NULL,
+    `c3` bigint NULL
 )
-WITH BROKER "hdfs"
-(
-    "username" = "user",
-    "password" = "passwd"
-);
+DISTRIBUTED BY HASH(c1) BUCKETS 20
+PROPERTIES("replication_num" = "1");
+
+
+insert into tbl values
+    (1, 'doris', 18),
+    (2, 'nereids', 20),
+    (3, 'pipelibe', 99999),
+    (4, 'Apache', 122123455),
+    (5, null, null);
 ```
 
-* `label`：本次导出作业的标识。后续可以使用这个标识查看作业状态。
-* `column_separator`：列分隔符。默认为 `\t`。支持不可见字符，比如 '\x07'。
-* `columns`：要导出的列，使用英文状态逗号隔开，如果不填这个参数默认是导出表的所有列。
-* `line_delimiter`：行分隔符。默认为 `\n`。支持不可见字符，比如 '\x07'。
-* `exec_mem_limit`： 表示 Export 作业中，一个查询计划在单个 BE 上的内存使用限制。默认 2GB。单位字节。
-* `timeout`：作业超时时间。默认 2小时。单位秒。
-* `tablet_num_per_task`：每个查询计划分配的最大分片数。默认为 5。
+### 创建导出作业
 
-### 导出到对象存储
+#### 导出到 HDFS
 
-创建名为 s3_repo 的仓库，直接链接云存储，而不通过broker.
+将 tbl 表的所有数据导出到 HDFS 上，设置导出作业的文件格式为 csv（默认格式），并设置列分割符为 `,`。
 
 ```sql
-CREATE REPOSITORY `s3_repo`
-WITH S3
-ON LOCATION "s3://s3-repo"
+EXPORT TABLE tbl
+TO "hdfs://host/path/to/export_" 
 PROPERTIES
 (
-    "AWS_ENDPOINT" = "http://s3-REGION.amazonaws.com",
-    "AWS_ACCESS_KEY" = "AWS_ACCESS_KEY",
-    "AWS_SECRET_KEY"="AWS_SECRET_KEY",
-    "AWS_REGION" = "REGION"
+    "line_delimiter" = ","
+)
+with HDFS (
+    "fs.defaultFS"="hdfs://hdfs_host:port",
+    "hadoop.username" = "hadoop"
 );
 ```
 
-- `AWS_ACCESS_KEY`/`AWS_SECRET_KEY`：是您访问OSS API 的密钥.
-- `AWS_ENDPOINT`：表示OSS的数据中心所在的地域.
-- `AWS_REGION`：Endpoint表示OSS对外服务的访问域名.
+#### 导出到对象存储
 
-### 查看导出状态
-
-提交作业后，可以通过  [SHOW EXPORT](../../sql-manual/sql-reference/Show-Statements/SHOW-EXPORT.md) 命令查询导入作业状态。结果举例如下：
+将 tbl 表中的所有数据导出到对象存储上，设置导出作业的文件格式为 csv（默认格式），并设置列分割符为`,`。
 
 ```sql
-mysql> show EXPORT\G;
-*************************** 1. row ***************************
-     JobId: 14008
-     State: FINISHED
-  Progress: 100%
-  TaskInfo: {"partitions":["*"],"exec mem limit":2147483648,"column separator":",","line delimiter":"\n","tablet num":1,"broker":"hdfs","coord num":1,"db":"default_cluster:db1","tbl":"tbl3"}
-      Path: bos://bj-test-cmy/export/
-CreateTime: 2019-06-25 17:08:24
- StartTime: 2019-06-25 17:08:28
-FinishTime: 2019-06-25 17:08:34
-   Timeout: 3600
-  ErrorMsg: NULL
-1 row in set (0.01 sec)
+EXPORT TABLE tbl TO "s3://bucket/export/export_" 
+PROPERTIES (
+    "line_delimiter" = ","
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
 ```
 
-* JobId：作业的唯一 ID
-* State：作业状态：
-  * PENDING：作业待调度
-  * EXPORTING：数据导出中
-  * FINISHED：作业成功
-  * CANCELLED：作业失败
-* Progress：作业进度。该进度以查询计划为单位。假设一共 10 个查询计划，当前已完成 3 个，则进度为 30%。
-* TaskInfo：以 Json 格式展示的作业信息：
-  * db：数据库名
-  * tbl：表名
-  * partitions：指定导出的分区。`*` 表示所有分区。
-  * exec mem limit：查询计划内存使用限制。单位字节。
-  * column separator：导出文件的列分隔符。
-  * line delimiter：导出文件的行分隔符。
-  * tablet num：涉及的总 Tablet 数量。
-  * broker：使用的 broker 的名称。
-  * coord num：查询计划的个数。
-* Path：远端存储上的导出路径。
-* CreateTime/StartTime/FinishTime：作业的创建时间、开始调度时间和结束时间。
-* Timeout：作业超时时间。单位是秒。该时间从 CreateTime 开始计算。
-* ErrorMsg：如果作业出现错误，这里会显示错误原因。
+### 查看导出作业
+提交作业后，可以通过 [SHOW EXPORT](../../sql-manual/sql-statements/data-modification/load-and-export/SHOW-EXPORT) 命令查询导出作业状态，结果举例如下：
 
+```sql
+mysql> show export\G
+*************************** 1. row ***************************
+      JobId: 143265
+      Label: export_0aa6c944-5a09-4d0b-80e1-cb09ea223f65
+      State: FINISHED
+   Progress: 100%
+   TaskInfo: {"partitions":[],"parallelism":5,"data_consistency":"partition","format":"csv","broker":"S3","column_separator":"\t","line_delimiter":"\n","max_file_size":"2048MB","delete_existing_files":"","with_bom":"false","db":"tpch1","tbl":"lineitem"}
+       Path: s3://bucket/export/export_
+ CreateTime: 2024-06-11 18:01:18
+  StartTime: 2024-06-11 18:01:18
+ FinishTime: 2024-06-11 18:01:31
+    Timeout: 7200
+   ErrorMsg: NULL
+OutfileInfo: [
+  [
+    {
+      "fileNumber": "1",
+      "totalRows": "6001215",
+      "fileSize": "747503989",
+      "url": "s3://bucket/export/export_6555cd33e7447c1-baa9568b5c4eb0ac_*"
+    }
+  ]
+]
+1 row in set (0.00 sec)
+```
 
+有关 `show export` 命令的详细用法及其返回结果的各个列的含义可以参看 [SHOW EXPORT](../../sql-manual/sql-statements/data-modification/load-and-export/SHOW-EXPORT)：
 
-## 最佳实践
+### 取消导出作业
 
-### 查询计划的拆分
+提交 Export 作业后，在 Export 任务成功或失败之前可以通过 [CANCEL EXPORT](../../sql-manual/sql-statements/data-modification/load-and-export/CANCEL-EXPORT) 命令取消导出作业。取消命令举例如下：
 
-一个 Export 作业有多少查询计划需要执行，取决于总共有多少 Tablet，以及一个查询计划最多可以分配多少个 Tablet。因为多个查询计划是串行执行的，所以如果让一个查询计划处理更多的分片，则可以减少作业的执行时间。但如果查询计划出错（比如调用 Broker 的 RPC 失败，远端存储出现抖动等），过多的 Tablet 会导致一个查询计划的重试成本变高。所以需要合理安排查询计划的个数以及每个查询计划所需要扫描的分片数，在执行时间和执行成功率之间做出平衡。一般建议一个查询计划扫描的数据量在 3-5 GB内（一个表的 Tablet 的大小以及个数可以通过 `SHOW TABLET FROM tbl_name;` 语句查看。）。
+```sql
+CANCEL EXPORT FROM dbName WHERE LABEL like "%export_%";
+```
 
-### exec\_mem\_limit
+## 导出说明
 
-通常一个 Export 作业的查询计划只有 `扫描`-`导出` 两部分，不涉及需要太多内存的计算逻辑。所以通常 2GB 的默认内存限制可以满足需求。但在某些场景下，比如一个查询计划，在同一个 BE 上需要扫描的 Tablet 过多，或者 Tablet 的数据版本过多时，可能会导致内存不足。此时需要通过这个参数设置更大的内存，比如 4GB、8GB 等。
+### 导出数据源
+
+`EXPORT` 当前支持导出以下类型的表或视图
+
+* Doris 内表
+* Doris 逻辑视图
+* External Catalog 中的表
+
+### 导出数据存储位置
+
+`Export` 目前支持导出到以下存储位置：
+
+- 对象存储：Amazon S3、COS、OSS、OBS、Google GCS
+- HDFS
+
+### 导出文件类型
+
+`EXPORT` 目前支持导出为以下文件格式：
+
+* Parquet
+* ORC
+* csv
+* csv\_with\_names
+* csv\_with\_names\_and\_types
+
+## 导出示例
+
+### 导出到开启了高可用的 HDFS 集群
+
+如果 HDFS 开启了高可用，则需要提供 HA 信息，如：
+
+```sql
+EXPORT TABLE tbl 
+TO "hdfs://HDFS8000871/path/to/export_" 
+PROPERTIES
+(
+    "line_delimiter" = ","
+)
+with HDFS (
+    "fs.defaultFS" = "hdfs://HDFS8000871",
+    "hadoop.username" = "hadoop",
+    "dfs.nameservices" = "your-nameservices",
+    "dfs.ha.namenodes.your-nameservices" = "nn1,nn2",
+    "dfs.namenode.rpc-address.HDFS8000871.nn1" = "ip:port",
+    "dfs.namenode.rpc-address.HDFS8000871.nn2" = "ip:port",
+    "dfs.client.failover.proxy.provider.HDFS8000871" = "org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider"
+);
+```
+
+### 导出到开启了高可用及 kerberos 认证的 HDFS 集群
+
+如果 Hadoop 集群开启了高可用并且启用了 Kerberos 认证，可以参考如下 SQL 语句：
+
+```sql
+EXPORT TABLE tbl 
+TO "hdfs://HDFS8000871/path/to/export_" 
+PROPERTIES
+(
+    "line_delimiter" = ","
+)
+with HDFS (
+    "fs.defaultFS"="hdfs://hacluster/",
+    "hadoop.username" = "hadoop",
+    "dfs.nameservices"="hacluster",
+    "dfs.ha.namenodes.hacluster"="n1,n2",
+    "dfs.namenode.rpc-address.hacluster.n1"="192.168.0.1:8020",
+    "dfs.namenode.rpc-address.hacluster.n2"="192.168.0.2:8020",
+    "dfs.client.failover.proxy.provider.hacluster"="org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider",
+    "dfs.namenode.kerberos.principal"="hadoop/_HOST@REALM.COM"
+    "hadoop.security.authentication"="kerberos",
+    "hadoop.kerberos.principal"="doris_test@REALM.COM",
+    "hadoop.kerberos.keytab"="/path/to/doris_test.keytab"
+);
+```
+
+### 指定分区导出
+
+导出作业支持仅导出 Doris 内表的部分分区，如仅导出 test 表的 p1 和 p2 分区
+
+```sql
+EXPORT TABLE test
+PARTITION (p1,p2)
+TO "s3://bucket/export/export_" 
+PROPERTIES (
+    "columns" = "k1,k2"
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
+```
+
+### 导出时过滤数据
+
+导出作业支持导出时根据谓词条件过滤数据，仅导出符合条件的数据，如仅导出满足 `k1 < 50` 条件的数据
+
+```sql
+EXPORT TABLE test
+WHERE k1 < 50
+TO "s3://bucket/export/export_"
+PROPERTIES (
+    "columns" = "k1,k2",
+    "column_separator"=","
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
+```
+
+### 导出外表数据
+
+导出作业支持 Export Catalog 外表数据的导出：
+
+```sql
+-- Create a hive catalog
+CREATE CATALOG hive_catalog PROPERTIES (
+    'type' = 'hms',
+    'hive.metastore.uris' = 'thrift://172.0.0.1:9083'
+);
+
+-- Export hive table
+EXPORT TABLE hive_catalog.sf1.lineitem TO "s3://bucket/export/export_"
+PROPERTIES(
+    "format" = "csv",
+    "max_file_size" = "1024MB"
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
+```
+
+### 导出前清空导出目录
+
+```sql
+EXPORT TABLE test TO "s3://bucket/export/export_"
+PROPERTIES (
+    "format" = "parquet",
+    "max_file_size" = "512MB",
+    "delete_existing_files" = "true"
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
+```
+
+如果设置了 `"delete_existing_files" = "true"`，导出作业会先将 `s3://bucket/export/` 目录下所有文件及目录删除，然后导出数据到该目录下。
+
+若要使用 `delete_existing_files` 参数，还需要在 `fe.conf` 中添加配置 `enable_delete_existing_files = true` 并重启 fe，此时 `delete_existing_files` 才会生效。该操作会删除外部系统的数据，属于高危操作，请自行确保外部系统的权限和数据安全性。
+
+### 设置导出文件的大小
+
+导出作业支持设置导出文件的大小，如果单个文件大小超过设定值，则会对导出文件进行切分。
+
+```sql
+EXPORT TABLE test TO "s3://bucket/export/export_"
+PROPERTIES (
+    "format" = "parquet",
+    "max_file_size" = "512MB"
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
+```
+
+通过设置 `"max_file_size" = "512MB"`，则单个导出文件的最大大小为 512MB。
 
 ## 注意事项
 
-* 不建议一次性导出大量数据。一个 Export 作业建议的导出数据量最大在几十 GB。过大的导出会导致更多的垃圾文件和更高的重试成本。
-* 如果表数据量过大，建议按照分区导出。
-* 在 Export 作业运行过程中，如果 FE 发生重启或切主，则 Export 作业会失败，需要用户重新提交。
-* 如果 Export 作业运行失败，在远端存储中产生的 `__doris_export_tmp_xxx` 临时目录，以及已经生成的文件不会被删除，需要用户手动删除。
-* 如果 Export 作业运行成功，在远端存储中产生的 `__doris_export_tmp_xxx` 目录，根据远端存储的文件系统语义，可能会保留，也可能会被清除。比如对象存储（支持S3协议）中，通过 rename 操作将一个目录中的最后一个文件移走后，该目录也会被删除。如果该目录没有被清除，用户可以手动清除。
-* 当 Export 运行完成后（成功或失败），FE 发生重启或切主，则  [SHOW EXPORT](../../sql-manual/sql-reference/Show-Statements/SHOW-EXPORT.md) 展示的作业的部分信息会丢失，无法查看。
-* Export 作业只会导出 Base 表的数据，不会导出 Rollup Index 的数据。
-* Export 作业会扫描数据，占用 IO 资源，可能会影响系统的查询延迟。
+* 导出数据量
 
-## 相关配置
+  不建议一次性导出大量数据。一个 Export 作业建议的导出数据量最大在几十 GB。过大的导出会导致更多的垃圾文件和更高的重试成本。如果表数据量过大，建议按照分区导出。
 
-### FE
+  另外，Export 作业会扫描数据，占用 IO 资源，可能会影响系统的查询延迟。
 
-* `export_checker_interval_second`：Export 作业调度器的调度间隔，默认为 5 秒。设置该参数需重启 FE。
-* `export_running_job_num_limit`：正在运行的 Export 作业数量限制。如果超过，则作业将等待并处于 PENDING 状态。默认为 5，可以运行时调整。
-* `export_task_default_timeout_second`：Export 作业默认超时时间。默认为 2 小时。可以运行时调整。
-* `export_tablet_num_per_task`：一个查询计划负责的最大分片数。默认为 5。
+* 导出文件的管理
 
-## 更多帮助
+  如果 Export 作业运行失败，已经生成的文件不会被删除，需要用户手动删除。
 
-关于 Export 使用的更多详细语法及最佳实践，请参阅 [Export](../../sql-manual/sql-reference/Show-Statements/SHOW-EXPORT.md) 命令手册，你也可以在 MySql 客户端命令行下输入 `HELP EXPORT` 获取更多帮助信息。
+* 导出超时
+
+  若导出的数据量很大，超过导出的超时时间，则 Export 任务会失败。此时可以在 Export 命令中指定 `timeout` 参数来增加超时时间并重试 Export 命令。
+
+* 导出失败
+
+  在 Export 作业运行过程中，如果 FE 发生重启或切主，则 Export 作业会失败，需要用户重新提交。可以通过`show export` 命令查看 Export 任务状态。
+
+* 导出分区数量
+
+  一个 Export Job 允许导出的分区数量最大为 2000，可以在 fe.conf 中添加参数`maximum_number_of_export_partitions`并重启 FE 来修改该设置。
+
+* 数据完整性
+
+  导出操作完成后，建议验证导出的数据是否完整和正确，以确保数据的质量和完整性。
+
+## 附录
+
+### 基本原理
+
+Export 任务的底层是执行`SELECT INTO OUTFILE` SQL 语句。用户发起一个 Export 任务后，Doris 会根据 Export 要导出的表构造出一个或多个 `SELECT INTO OUTFILE` 执行计划，随后将这些`SELECT INTO OUTFILE` 执行计划提交给 Doris 的 Job Schedule 任务调度器，Job Schedule 任务调度器会自动调度这些任务并执行。
+
+### 导出到本地文件系统
+
+导出到本地文件系统功能默认是关闭的。这个功能仅用于本地调试和开发，请勿用于生产环境。
+
+如要开启这个功能请在 `fe.conf` 中添加 `enable_outfile_to_local=true` 并且重启 FE。
+
+示例：将 tbl 表中的所有数据导出到本地文件系统，设置导出作业的文件格式为 csv（默认格式），并设置列分割符为`,`。
+
+```sql
+EXPORT TABLE db.tbl TO "file:///path/to/result_"
+PROPERTIES (
+  "format" = "csv",
+  "line_delimiter" = ","
+);
+```
+
+此功能会将数据导出并写入到 BE 所在节点的磁盘上，如果有多个 BE 节点，则数据会根据导出任务的并发度分散在不同 BE 节点上，每个节点有一部分数据。
+
+如在这个示例中，最终会在 BE 节点的 `/path/to/` 下生产一组类似 `result_7052bac522d840f5-972079771289e392_0.csv` 的文件。
+
+具体的 BE 节点 IP 可以在 `SHOW EXPORT` 结果中的 `OutfileInfo` 列查看，如：
+
+```
+[
+    [
+        {
+            "fileNumber": "1", 
+            "totalRows": "0", 
+            "fileSize": "8388608", 
+            "url": "file:///172.20.32.136/path/to/result_7052bac522d840f5-972079771289e392_*"
+        }
+    ], 
+    [
+        {
+            "fileNumber": "1", 
+            "totalRows": "0", 
+            "fileSize": "8388608", 
+            "url": "file:///172.20.32.137/path/to/result_22aba7ec933b4922-ba81e5eca12bf0c2_*"
+        }
+    ]
+]
+```
+
+:::caution
+此功能不适用于生产环境，并且请自行确保导出目录的权限和数据安全性。
+:::
+

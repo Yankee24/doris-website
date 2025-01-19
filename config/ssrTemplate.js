@@ -1,5 +1,7 @@
+const fetchUrl = "https://cdnd.selectdb.com";
+
 module.exports = {
-    ssrTemplate: `<!DOCTYPE html>
+  ssrTemplate: `<!DOCTYPE html>
 <html <%~ it.htmlAttributes %>>
   <head>
     <meta charset="UTF-8">
@@ -13,10 +15,10 @@ module.exports = {
       <%~ metaAttribute %>
     <% }); %>
     <% it.stylesheets.forEach((stylesheet) => { %>
-      <link rel="stylesheet" href="<%= 'https://cdn-tencent.selectdb.com' %><%= it.baseUrl %><%= stylesheet %>" />
+      <link rel="stylesheet" href="<%= 'https://cdnd.selectdb.com' %><%= it.baseUrl %><%= stylesheet %>" />
     <% }); %>
     <% it.scripts.forEach((script) => { %>
-      <link rel="preload" href="<%= 'https://cdn-tencent.selectdb.com' %><%= it.baseUrl %><%= script %>" as="script">
+      <link rel="preload" href="<%= 'https://cdnd.selectdb.com' %><%= it.baseUrl %><%= script %>" as="script">
     <% }); %>
   </head>
   <body <%~ it.bodyAttributes %>>
@@ -25,7 +27,7 @@ module.exports = {
       <%~ it.appHtml %>
     </div>
     <% it.scripts.forEach((script) => { %>
-      <script src="<%= 'https://cdn-tencent.selectdb.com' %><%= it.baseUrl %><%= script %>"></script>
+      <script src="<%= 'https://cdnd.selectdb.com' %><%= it.baseUrl %><%= script %>"></script>
     <% }); %>
     <%~ it.postBodyTags %>
   </body>

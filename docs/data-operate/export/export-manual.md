@@ -1,11 +1,11 @@
 ---
 {
-    "title": "Data export",
+    "title": "EXPORT",
     "language": "en"
 }
 ---
 
-<!-- 
+<!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
 distributed with this work for additional information
@@ -24,212 +24,379 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Data export
+This document will introduce how to use the `EXPORT` command to export the data stored in Doris.
 
-Export is a function provided by Doris to export data. This function can export user-specified table or partition data in text format to remote storage through Broker process, such as HDFS / Object storage (supports S3 protocol) etc.
+`Export` is a function provided by Doris for asynchronously exporting data. This function can export the data of the tables or partitions specified by users in the specified file format to the target storage systems, including object storage, HDFS or local file system.
 
-This document mainly introduces the basic principles, usage, best practices and precautions of Export.
+`Export` is an asynchronously executed command. Once the command is executed successfully, it will return the result immediately. Users can view the detailed information of the Export task through the `Show Export` command.
 
-## Noun Interpretation
+For the detailed introduction of the `EXPORT` command, please refer to: [EXPORT](../../sql-manual/sql-statements/data-modification/load-and-export/EXPORT)
 
-* FE: Frontend, the front-end node of Doris. Responsible for metadata management and request access.
-* BE: Backend, Doris's back-end node. Responsible for query execution and data storage.
-* Broker: Doris can manipulate files for remote storage through the Broker process.
-* Tablet: Data fragmentation. A table is divided into multiple data fragments.
+Regarding how to choose between `SELECT INTO OUTFILE` and `EXPORT`, please refer to [Export Overview](../../data-operate/export/export-overview.md).
 
-## Principle
+## Applicable Scenarios
 
-After the user submits an Export job. Doris counts all Tablets involved in this job. These tablets are then grouped to generate a special query plan for each group. The query plan reads the data on the included tablet and then writes the data to the specified path of the remote storage through Broker. It can also be directly exported to the remote storage that supports S3 protocol through S3 protocol.
+`Export` is applicable to the following scenarios:
 
-The overall mode of dispatch is as follows:
+- Exporting a single table with a large amount of data, only requiring simple filtering conditions.
+- Scenarios where tasks need to be submitted asynchronously.
 
-```
-+--------+
-| Client |
-+---+----+
-    |  1. Submit Job
-    |
-+---v--------------------+
-| FE                     |
-|                        |
-| +-------------------+  |
-| | ExportPendingTask |  |
-| +-------------------+  |
-|                        | 2. Generate Tasks
-| +--------------------+ |
-| | ExportExporingTask | |
-| +--------------------+ |
-|                        |
-| +-----------+          |     +----+   +------+   +---------+
-| | QueryPlan +----------------> BE +--->Broker+--->         |
-| +-----------+          |     +----+   +------+   | Remote  |
-| +-----------+          |     +----+   +------+   | Storage |
-| | QueryPlan +----------------> BE +--->Broker+--->         |
-| +-----------+          |     +----+   +------+   +---------+
-+------------------------+         3. Execute Tasks
+The following limitations should be noted when using `Export`:
 
-```
+- Currently, exporting in compressed text file formats is not supported.
+- Exporting the result set of `Select` is not supported. If you need to export the `Select` result set, please use [OUTFILE Export](../../data-operate/export/outfile.md).
 
-1. The user submits an Export job to FE.
-2. FE's Export scheduler performs an Export job in two stages:
-	1. PENDING: FE generates Export Pending Task, sends snapshot command to BE, and takes a snapshot of all Tablets involved. And generate multiple query plans.
-	2. EXPORTING: FE generates Export ExportingTask and starts executing the query plan.
-
-### query plan splitting
-
-The Export job generates multiple query plans, each of which scans a portion of the Tablet. The number of Tablets scanned by each query plan is specified by the FE configuration parameter `export_tablet_num_per_task`, which defaults to 5. That is, assuming a total of 100 Tablets, 20 query plans will be generated. Users can also specify this number by the job attribute `tablet_num_per_task`, when submitting a job.
-
-Multiple query plans for a job are executed sequentially.
-
-### Query Plan Execution
-
-A query plan scans multiple fragments, organizes read data in rows, batches every 1024 actions, and writes Broker to remote storage.
-
-The query plan will automatically retry three times if it encounters errors. If a query plan fails three retries, the entire job fails.
-
-Doris will first create a temporary directory named `doris_export_tmp_12345` (where `12345` is the job id) in the specified remote storage path. The exported data is first written to this temporary directory. Each query plan generates a file with an example file name:
-
-`export-data-c69fcf2b6db5420f-a96b94c1ff8bccef-1561453713822`
-
-Among them, `c69fcf2b6db5420f-a96b94c1ff8bccef` is the query ID of the query plan. ` 1561453713822` Timestamp generated for the file.
-
-When all data is exported, Doris will rename these files to the user-specified path.
-
-### Broker parameter
-
-Export needs to use the Broker process to access remote storage. Different brokers need to provide different parameters. For details, please refer to [Broker documentation](../../advanced/broker.md)
-
-
-## Start Export
-
-For detailed usage of Export, please refer to [SHOW EXPORT](../../sql-manual/sql-reference/Show-Statements/SHOW-EXPORT.md).
-
-Export's detailed commands can be passed through `HELP EXPORT;` Examples are as follows:
-
-### Export to hdfs
+## Quick Start
+### Table Creation and Data Import
 
 ```sql
-EXPORT TABLE db1.tbl1 
-PARTITION (p1,p2)
-[WHERE [expr]]
-TO "hdfs://bj-test-cmy/export/" 
-PROPERTIES
-(
-    "label"="mylabel",
-    "column_separator"=",",
-    "columns" = "col1,col2",
-    "exec_mem_limit"="2147483648",
-    "timeout" = "3600"
+CREATE TABLE IF NOT EXISTS tbl (
+    `c1` int(11) NULL,
+    `c2` string NULL,
+    `c3` bigint NULL
 )
-WITH BROKER "hdfs"
-(
-	"username" = "user",
-	"password" = "passwd"
-);
+DISTRIBUTED BY HASH(c1) BUCKETS 20
+PROPERTIES("replication_num" = "1");
+
+
+insert into tbl values
+    (1, 'doris', 18),
+    (2, 'nereids', 20),
+    (3, 'pipelibe', 99999),
+    (4, 'Apache', 122123455),
+    (5, null, null);
 ```
 
-* `label`: The identifier of this export job. You can use this identifier to view the job status later.
-* `column_separator`: Column separator. The default is `\t`. Supports invisible characters, such as'\x07'.
-* `column`: columns to be exported, separated by commas, if this parameter is not filled in, all columns of the table will be exported by default.
-* `line_delimiter`: Line separator. The default is `\n`. Supports invisible characters, such as'\x07'.
-* `exec_mem_limit`: Represents the memory usage limitation of a query plan on a single BE in an Export job. Default 2GB. Unit bytes.
-* `timeout`: homework timeout. Default 2 hours. Unit seconds.
-* `tablet_num_per_task`: The maximum number of fragments allocated per query plan. The default is 5.
+### Create an Export Job
 
-### Export to object storage (supports S3 protocol)
+#### Export to HDFS
 
-Create a repository named s3_repo to link cloud storage directly without going through the broker.
+Export all data from the `tbl` table to HDFS. Set the file format of the export job to csv (the default format) and set the column delimiter to `,`. 
 
 ```sql
-CREATE REPOSITORY `s3_repo`
-WITH S3
-ON LOCATION "s3://s3-repo"
+EXPORT TABLE tbl
+TO "hdfs://host/path/to/export/" 
 PROPERTIES
 (
-    "AWS_ENDPOINT" = "http://s3-REGION.amazonaws.com",
-    "AWS_ACCESS_KEY" = "AWS_ACCESS_KEY",
-    "AWS_SECRET_KEY"="AWS_SECRET_KEY",
-    "AWS_REGION" = "REGION"
+    "line_delimiter" = ","
+)
+with HDFS (
+    "fs.defaultFS"="hdfs://hdfs_host:port",
+    "hadoop.username" = "hadoop"
 );
 ```
 
-- `AWS_ACCESS_KEY`/`AWS_SECRET_KEY`：Is your key to access the OSS API.
-- `AWS_ENDPOINT`：Endpoint indicates the access domain name of OSS external services.
-- `AWS_REGION`：Region indicates the region where the OSS data center is located.
+#### Export to Object Storage
 
-### View export status
-
-After submitting a job, the job status can be imported by querying the   [SHOW EXPORT](../../sql-manual/sql-reference/Show-Statements/SHOW-EXPORT.md)  command. The results are as follows:
+Export all the data in the `tbl` table to the object storage, set the file format of the export job to csv (the default format), and set the column delimiter to `,`.
 
 ```sql
-mysql> show EXPORT\G;
-*************************** 1. row ***************************
-     JobId: 14008
-     State: FINISHED
-  Progress: 100%
-  TaskInfo: {"partitions":["*"],"exec mem limit":2147483648,"column separator":",","line delimiter":"\n","tablet num":1,"broker":"hdfs","coord num":1,"db":"default_cluster:db1","tbl":"tbl3"}
-      Path: bos://bj-test-cmy/export/
-CreateTime: 2019-06-25 17:08:24
- StartTime: 2019-06-25 17:08:28
-FinishTime: 2019-06-25 17:08:34
-   Timeout: 3600
-  ErrorMsg: NULL
-1 row in set (0.01 sec)
+EXPORT TABLE tbl TO "s3://bucket/export/export_" 
+PROPERTIES (
+    "line_delimiter" = ","
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
 ```
 
+### View Export Jobs
 
-* JobId: The unique ID of the job
-* State: Job status:
-	* PENDING: Jobs to be Scheduled
-	* EXPORTING: Data Export
-	* FINISHED: Operation Successful
-	* CANCELLED: Job Failure
-* Progress: Work progress. The schedule is based on the query plan. Assuming a total of 10 query plans have been completed, the progress will be 30%.
-* TaskInfo: Job information in Json format:
-	* db: database name
-	* tbl: Table name
-	* partitions: Specify the exported partition. `*` Represents all partitions.
-	* exec MEM limit: query plan memory usage limit. Unit bytes.
-	* column separator: The column separator for the exported file.
-	* line delimiter: The line separator for the exported file.
-	* tablet num: The total number of tablets involved.
-	* Broker: The name of the broker used.
-	* Coord num: Number of query plans.
-* Path: Export path on remote storage.
-* CreateTime/StartTime/FinishTime: Creation time, start scheduling time and end time of jobs.
-* Timeout: Job timeout. The unit is seconds. This time is calculated from CreateTime.
-* Error Msg: If there is an error in the job, the cause of the error is shown here.
+After submitting a job, you can query the status of the export job via the [SHOW EXPORT](../../sql-manual/sql-statements/data-modification/load-and-export/SHOW-EXPORT) command. An example of the result is as follows: 
 
-## Best Practices
+```sql
+mysql> show export\G
+*************************** 1. row ***************************
+      JobId: 143265
+      Label: export_0aa6c944-5a09-4d0b-80e1-cb09ea223f65
+      State: FINISHED
+   Progress: 100%
+   TaskInfo: {"partitions":[],"parallelism":5,"data_consistency":"partition","format":"csv","broker":"S3","column_separator":"\t","line_delimiter":"\n","max_file_size":"2048MB","delete_existing_files":"","with_bom":"false","db":"tpch1","tbl":"lineitem"}
+       Path: s3://bucket/export/export_
+ CreateTime: 2024-06-11 18:01:18
+  StartTime: 2024-06-11 18:01:18
+ FinishTime: 2024-06-11 18:01:31
+    Timeout: 7200
+   ErrorMsg: NULL
+OutfileInfo: [
+  [
+    {
+      "fileNumber": "1",
+      "totalRows": "6001215",
+      "fileSize": "747503989",
+      "url": "s3://bucket/export/export_6555cd33e7447c1-baa9568b5c4eb0ac_*"
+    }
+  ]
+]
+1 row in set (0.00 sec)
+```
 
-### Splitting Query Plans
+For the detailed usage of the `show export` command and the meaning of each column in the returned results, please refer to [SHOW EXPORT](../../sql-manual/sql-statements/data-modification/load-and-export/SHOW-EXPORT).
 
-How many query plans need to be executed for an Export job depends on the total number of Tablets and how many Tablets can be allocated for a query plan at most. Since multiple query plans are executed serially, the execution time of jobs can be reduced if more fragments are processed by one query plan. However, if the query plan fails (e.g., the RPC fails to call Broker, the remote storage jitters, etc.), too many tablets can lead to a higher retry cost of a query plan. Therefore, it is necessary to arrange the number of query plans and the number of fragments to be scanned for each query plan in order to balance the execution time and the success rate of execution. It is generally recommended that the amount of data scanned by a query plan be within 3-5 GB (the size and number of tables in a table can be viewed by `SHOW TABLET FROM tbl_name;`statement.
+### Cancel Export Jobs
 
-### exec\_mem\_limit
+After submitting an Export job, the export job can be cancelled via the [CANCEL EXPORT](../../sql-manual/sql-statements/data-modification/load-and-export/CANCEL-EXPORT) command before the Export task succeeds or fails. An example of the cancellation command is as follows: 
 
-Usually, a query plan for an Export job has only two parts `scan`- `export`, and does not involve computing logic that requires too much memory. So usually the default memory limit of 2GB can satisfy the requirement. But in some scenarios, such as a query plan, too many Tablets need to be scanned on the same BE, or too many data versions of Tablets, may lead to insufficient memory. At this point, larger memory needs to be set through this parameter, such as 4 GB, 8 GB, etc.
+```sql
+CANCEL EXPORT FROM dbName WHERE LABEL like "%export_%";
+```
 
-## Notes
+## Export Instructions
 
-* It is not recommended to export large amounts of data at one time. The maximum amount of exported data recommended by an Export job is tens of GB. Excessive export results in more junk files and higher retry costs.
-* If the amount of table data is too large, it is recommended to export it by partition.
-* During the operation of the Export job, if FE restarts or cuts the master, the Export job will fail, requiring the user to resubmit.
-* If the Export job fails, the `__doris_export_tmp_xxx` temporary directory generated in the remote storage and the generated files will not be deleted, requiring the user to delete them manually.
-* If the Export job runs successfully, the `__doris_export_tmp_xxx` directory generated in the remote storage may be retained or cleared according to the file system semantics of the remote storage. For example, in object storage (supporting the S3 protocol), after removing the last file in a directory through rename operation, the directory will also be deleted. If the directory is not cleared, the user can clear it manually.
-* When the Export runs successfully or fails, the FE reboots or cuts, then some information of the jobs displayed by `SHOW EXPORT` will be lost and cannot be viewed.
-* Export jobs only export data from Base tables, not Rollup Index.
-* Export jobs scan data and occupy IO resources, which may affect the query latency of the system.
+### Export Data Sources
 
-## Relevant configuration
+`EXPORT` currently supports exporting the following types of tables or views:
 
-### FE
+- Internal tables in Doris
+- Logical views in Doris
+- Tables in External Catalog
 
-* `expo_checker_interval_second`: Scheduling interval of Export job scheduler, default is 5 seconds. Setting this parameter requires restarting FE.
-* `export_running_job_num_limit `: Limit on the number of Export jobs running. If exceeded, the job will wait and be in PENDING state. The default is 5, which can be adjusted at run time.
-* `Export_task_default_timeout_second`: Export job default timeout time. The default is 2 hours. It can be adjusted at run time.
-* `export_tablet_num_per_task`: The maximum number of fragments that a query plan is responsible for. The default is 5.
+### Export Data Storage Locations
 
-## More Help
+`Export` currently supports exporting to the following storage locations:
 
-For more detailed syntax and best practices used by Export, please refer to the [Export](../../sql-manual/sql-reference/Show-Statements/SHOW-EXPORT.md) command manual, you can also You can enter `HELP EXPORT` at the command line of the MySql client for more help.
+- Object storage: Amazon S3, COS, OSS, OBS, Google GCS
+- HDFS
+
+### Export File Types
+
+`EXPORT` currently supports exporting to the following file formats:
+
+* Parquet
+* ORC
+* csv
+* csv\_with\_names
+* csv\_with\_names\_and\_types
+
+## Examples
+
+### Export to an HDFS Cluster with High Availability Enabled
+
+If the HDFS has high availability enabled, HA information needs to be provided. For example:
+
+```sql
+EXPORT TABLE tbl 
+TO "hdfs://HDFS8000871/path/to/export_" 
+PROPERTIES
+(
+    "line_delimiter" = ","
+)
+with HDFS (
+    "fs.defaultFS" = "hdfs://HDFS8000871",
+    "hadoop.username" = "hadoop",
+    "dfs.nameservices" = "your-nameservices",
+    "dfs.ha.namenodes.your-nameservices" = "nn1,nn2",
+    "dfs.namenode.rpc-address.HDFS8000871.nn1" = "ip:port",
+    "dfs.namenode.rpc-address.HDFS8000871.nn2" = "ip:port",
+    "dfs.client.failover.proxy.provider.HDFS8000871" = "org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider"
+);
+```
+
+### Export to an HDFS Cluster with High Availability and Kerberos Authentication Enabled
+
+If the HDFS cluster has both high availability enabled and Kerberos authentication enabled, you can refer to the following SQL statements: 
+
+```sql
+EXPORT TABLE tbl 
+TO "hdfs://HDFS8000871/path/to/export_" 
+PROPERTIES
+(
+    "line_delimiter" = ","
+)
+with HDFS (
+    "fs.defaultFS"="hdfs://hacluster/",
+    "hadoop.username" = "hadoop",
+    "dfs.nameservices"="hacluster",
+    "dfs.ha.namenodes.hacluster"="n1,n2",
+    "dfs.namenode.rpc-address.hacluster.n1"="192.168.0.1:8020",
+    "dfs.namenode.rpc-address.hacluster.n2"="192.168.0.2:8020",
+    "dfs.client.failover.proxy.provider.hacluster"="org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider",
+    "dfs.namenode.kerberos.principal"="hadoop/_HOST@REALM.COM"
+    "hadoop.security.authentication"="kerberos",
+    "hadoop.kerberos.principal"="doris_test@REALM.COM",
+    "hadoop.kerberos.keytab"="/path/to/doris_test.keytab"
+);
+```
+
+### Specify Partition for Export
+
+The export job supports exporting only some partitions of the internal tables in Doris. For example, only export partitions p1 and p2 of the `test` table. 
+
+```sql
+EXPORT TABLE test
+PARTITION (p1,p2)
+TO "s3://bucket/export/export_" 
+PROPERTIES (
+    "columns" = "k1,k2"
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
+```
+
+### Filter Data During Export
+
+The export job supports filtering data according to predicate conditions during the export process, exporting only the data that meets the conditions. For example, only export the data that satisfies the condition `k1 < 50`. 
+
+```sql
+EXPORT TABLE test
+WHERE k1 < 50
+TO "s3://bucket/export/export_"
+PROPERTIES (
+    "columns" = "k1,k2",
+    "column_separator"=","
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
+```
+
+### Export External Table Data
+
+The export job supports the data of tables in External Catalog.
+
+```sql
+-- Create a hive catalog
+CREATE CATALOG hive_catalog PROPERTIES (
+    'type' = 'hms',
+    'hive.metastore.uris' = 'thrift://172.0.0.1:9083'
+);
+
+-- Export hive table
+EXPORT TABLE hive_catalog.sf1.lineitem TO "s3://bucket/export/export_"
+PROPERTIES(
+    "format" = "csv",
+    "max_file_size" = "1024MB"
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
+```
+
+### Clearing the Export Directory Before Exporting
+
+```sql
+EXPORT TABLE test TO "s3://bucket/export/export_"
+PROPERTIES (
+    "format" = "parquet",
+    "max_file_size" = "512MB",
+    "delete_existing_files" = "true"
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
+```
+
+If `"delete_existing_files" = "true"` is set, the export job will first delete all files and directories under the `s3://bucket/export/` directory, and then export the data to this directory.
+
+If you want to use the `delete_existing_files` parameter, you also need to add the configuration `enable_delete_existing_files = true` in the `fe.conf` and restart the FE. Only then will the `delete_existing_files` take effect. This operation will delete the data of the external system and is a high-risk operation. Please ensure the permissions and data security of the external system on your own.
+
+### Setting the Size of Exported Files
+
+The export job supports setting the size of the export file. If the size of a single file exceeds the set value, it will be divided into multiple files for export according to the specified size.
+
+```sql
+EXPORT TABLE test TO "s3://bucket/export/export_"
+PROPERTIES (
+    "format" = "parquet",
+    "max_file_size" = "512MB"
+) WITH s3 (
+    "s3.endpoint" = "xxxxx",
+    "s3.region" = "xxxxx",
+    "s3.secret_key"="xxxx",
+    "s3.access_key" = "xxxxx"
+);
+```
+
+By setting `"max_file_size" = "512MB"`, the maximum size of a single exported file is 512MB.
+
+## Notice
+
+* Export Data Volume
+
+	It is not recommended to export a large amount of data at one time. The recommended maximum export data volume for an Export job is several tens of gigabytes. Excessive exports will lead to more junk files and higher retry costs. If the table data volume is too large, it is recommended to export by partitions.
+
+	In addition, the Export job will scan data and occupy IO resources, which may affect the query latency of the system.
+
+* Export File Management
+
+	If the Export job fails, the files that have already been generated will not be deleted, and users need to delete them manually.
+
+* Export Timeout
+
+	If the amount of exported data is very large and exceeds the export timeout period, the Export task will fail. At this time, you can specify the `timeout` parameter in the Export command to increase the timeout period and retry the Export command.
+
+* Export Failure
+
+	During the operation of the Export job, if the FE restarts or switches the master, the Export job will fail, and the user needs to resubmit it. You can check the status of the Export task through the `show export` command.
+
+* Number of Exported Partitions
+
+	The maximum number of partitions allowed to be exported by an Export Job is 2000. You can add the parameter `maximum_number_of_export_partitions` in fe.conf and restart the FE to modify this setting.
+
+* Data Integrity
+
+	After the export operation is completed, it is recommended to verify whether the exported data is complete and correct to ensure the quality and integrity of the data.
+
+## Appendix
+
+### Basic Principle
+
+The underlying layer of the Export task is to execute the `SELECT INTO OUTFILE` SQL statement. After a user initiates an Export task, Doris will construct one or more `SELECT INTO OUTFILE` execution plans according to the table to be exported by Export, and then submit these `SELECT INTO OUTFILE` execution plans to the Job Schedule task scheduler of Doris. The Job Schedule task scheduler will automatically schedule and execute these tasks.
+
+### Exporting to the Local File System
+
+The function of exporting to the local file system is disabled by default. This function is only used for local debugging and development, and should not be used in the production environment.
+
+If you want to enable this function, please add `enable_outfile_to_local=true` in the `fe.conf` and restart the FE.
+
+Example: Export all the data in the `tbl` table to the local file system, set the file format of the export job to csv (the default format), and set the column delimiter to `,`.
+
+```sql
+EXPORT TABLE tbl TO "file:///path/to/result_"
+PROPERTIES (
+  "format" = "csv",
+  "line_delimiter" = ","
+);
+```
+
+This function will export and write data to the disk of the node where the BE is located. If there are multiple BE nodes, the data will be scattered on different BE nodes according to the concurrency of the export task, and each node will have a part of the data.
+
+As in this example, a set of files similar to `result_7052bac522d840f5-972079771289e392_0.csv` will eventually be produced under `/path/to/` of the BE node.
+
+The specific BE node IP can be viewed in the `OutfileInfo` column in the `SHOW EXPORT` result, such as:
+
+```
+[
+    [
+        {
+            "fileNumber": "1", 
+            "totalRows": "0", 
+            "fileSize": "8388608", 
+            "url": "file:///172.20.32.136/path/to/result_7052bac522d840f5-972079771289e392_*"
+        }
+    ], 
+    [
+        {
+            "fileNumber": "1", 
+            "totalRows": "0", 
+            "fileSize": "8388608", 
+            "url": "file:///172.20.32.137/path/to/result_22aba7ec933b4922-ba81e5eca12bf0c2_*"
+        }
+    ]
+]
+```
+
+:::caution
+This function is not applicable to the production environment, and please ensure the permissions of the export directory and data security on your own.
+:::

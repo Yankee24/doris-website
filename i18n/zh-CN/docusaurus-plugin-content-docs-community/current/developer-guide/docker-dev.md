@@ -31,7 +31,7 @@ under the License.
 
 - [使用 Docker 开发镜像编译](/docs/install/source-install/compilation)
 - [部署](/docs/install/install-deploy)
-- [VSCode Be 开发调试](./be-vscode-dev)
+- [VSCode Be 开发调试](./be-vscode-dev.md)
 
 ## 环境准备
 
@@ -84,20 +84,22 @@ RUN wget https://github.com/robbyrussell/oh-my-zsh/raw/master/tools/install.sh -
 
 运行构建命令
 
-```bash
+```shell
 docker build -t doris .
 ```
 
 运行镜像
 
-此处按需注意 [挂载的问题](../../docs/install/source-install/compilation/)
+此处按需注意 [挂载的问题](../../docs/install/source-install/compilation-general.md)
 
 > 见链接中：建议以挂载本地 Doris 源码目录的方式运行镜像 .....
 
-由于如果是使用 windows 开发，挂载会存在跨文件系统访问的问题，请自行斟酌设置
+由于如果是使用 windows 开发，挂载会存在跨文件系统访问的问题，请自行斟酌设置。
 
-```bash
-docker run -it doris:latest /bin/bash
+`--cap-add SYS_PTRACE`参数可以允许docker使用ptrace，便于我们使用ptrace和gdb远程调试功能。
+
+```shell
+docker run -it --cap-add SYS_PTRACE doris:latest /bin/bash
 ```
 
 如果选择安装了 zsh
@@ -109,10 +111,12 @@ plugins=(git zsh-autosuggestions zsh-syntax-highlighting)
 
 创建目录并下载 doris
 
-```bash
+```shell
 su <your user>
 mkdir code && cd code
 git clone https://github.com/apache/doris.git
+cd doris
+git submodule update --init --recursive
 ```
 
 ## 编译
@@ -121,7 +125,7 @@ git clone https://github.com/apache/doris.git
 
 第一次编译的时候要使用如下命令
 
-```bash
+```shell
 sh build.sh --clean --be --fe --ui
 ```
 
@@ -129,7 +133,7 @@ sh build.sh --clean --be --fe --ui
 
 编译 Doris
 
-```bash
+```shell
 sh build.sh
 ```
 
@@ -137,26 +141,26 @@ sh build.sh
 
 手动创建 `meta_dir` 元数据存放位置, 默认值为 `${DORIS_HOME}/doris-meta`
 
-```bash
+```shell
 mkdir meta_dir
 ```
 
 启动FE
 
-```bash
+```shell
 cd output/fe
 sh bin/start_fe.sh --daemon
 ```
 
 启动BE
 
-```bash
+```shell
 cd output/be
 sh bin/start_be.sh --daemon
 ```
 
 mysql-client 连接
 
-```bash
+```shell
 mysql -h 127.0.0.1 -P 9030 -u root
 ```

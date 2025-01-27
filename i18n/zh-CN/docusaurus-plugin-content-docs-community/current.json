@@ -1,6 +1,6 @@
 {
   "version.label": {
-    "message": "Next",
+    "message": "current",
     "description": "The label for version current"
   },
   "sidebar.community.category.How to Contribute": {
@@ -9,18 +9,26 @@
   },
   "sidebar.community.category.Release Process & Verification": {
     "message": "版本发布与校验",
-    "description": "The label for category Release Process & Verification in sidebar community"
+    "description": "The label for category Doris Introduction in sidebar community"
+  },
+  "sidebar.community.category.Source Code Compilation": {
+    "message": "源码编译",
+    "description": "The label for category Source Code Compilation in sidebar community"
   },
   "sidebar.community.category.Design Documents": {
     "message": "设计文档",
-    "description": "The label for category Design Documents in sidebar community"
+    "description": "The label for category Developer Guide in sidebar community"
   },
   "sidebar.community.category.Developer Guide": {
     "message": "开发者手册",
     "description": "The label for category Developer Guide in sidebar community"
   },
-  "sidebar.community.link.Improvement Proposals": {
-    "message": "改进建议",
-    "description": "The label for link Improvement Proposals in sidebar community, linking to https://cwiki.apache.org/confluence/display/DORIS/Doris+Improvement+Proposals"
+  "sidebar.community.category.Mac Local Dev": {
+    "message": "Mac Local 开发",
+    "description": "The label for category Mac Local Dev in sidebar community"
+  },
+  "sidebar.community.category.Announcements": {
+    "message": "Doris 社区声明",
+    "description": "The label for category Mac Local Dev in sidebar community"
   }
 }

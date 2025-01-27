@@ -30,25 +30,25 @@ Doris support to use [Clangd](https://clangd.llvm.org/) and [Clang-Tidy](https:/
 to diagnostic code. Clangd and Clang-Tidy already has in [LDB-toolchain](/docs/install/source-install/compilation-with-ldb-toolchain)，also can install by self.
 
 ### Clang-Tidy
-Clang-Tidy can do some diagnostic cofig, config file `.clang-tidy` is in Doris root path. Compared with vscode-cpptools, clangd can provide more powerful and accurate code jumping for vscode, and integrates the analysis and quick-fix functions of clang-tidy.
+Clang-Tidy can do some diagnostic config, config file `.clang-tidy` is in Doris root path. Compared with vscode-cpptools, clangd can provide more powerful and accurate code jumping for vscode, and integrates the analysis and quick-fix functions of clang-tidy.
 
 ### Enable clangd on VSCODE
 
 First we should install clangd plugin, then edit `settings.json` or just change config on gui.
+Before using, compile `be(RELEASE)` and `be-ut(ASAN)` once to generate the corresponding `compile_commands.json` file.
 
 ```json
     "clangd.path": "ldb_toolchain/bin/clangd", //clangd path
     "clangd.arguments": [
         "--background-index",
         "--clang-tidy", //enable clang-tidy
-        "--compile-commands-dir=doris/be/build_RELEASE/", //clangd should read compile_commands.json create by cmake, so you should compile once
+        "--compile-commands-dir=doris/be/build_Release/",
         "--completion-style=detailed",
         "-j=5", //clangd diagnostic parallelism
         "--all-scopes-completion",
         "--pch-storage=memory",
         "--pretty",
-        "-log=verbose",
         "--query-driver=ldb_toolchain/bin/*" //path of compiler
     ],
-    "clangd.trace": "/home/disk2/pxl/dev/baidu/bdg/doris/core/output/clangd-server.log" //clangd log path
+    "clangd.trace": "output/clangd-server.log"
 ```

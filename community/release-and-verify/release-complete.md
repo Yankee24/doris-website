@@ -33,6 +33,8 @@ The steps in this document follow after the release has been voted on and approv
 When the official release poll is successful, send the [Result] email first, then prepare the release package.
 Copy the source package, signature file and hash file from the corresponding folder of the previous release under dev to another directory 1.xx, note that the file name should not be rcxx (you can rename, but do not recalculate the signature, the hash can be recalculated, the result will not change)
 
+> Only PMC members have permission to operate this step.
+
 ```
 From:
 https://dist.apache.org/repos/dist/dev/doris/
@@ -76,7 +78,7 @@ https://www.apache.org/dist/doris/1.xx/
 http://www.apache.org/dyn/closer.cgi/doris/1.xx/apache-doris-1.xx-src.tar.gz
 ```
 
-Ssource package:
+Source package:
 
 ```
 http://www.apache.org/dyn/closer.cgi/doris/1.xx/apache-doris-1.xx-src.tar.gz
@@ -98,7 +100,14 @@ refer to: <http://www.apache.org/dev/release-download-pages#closer>
 
 ### Maven
 
-Find staging repo on [https://repository.apache.org/#stagingRepositories](https://repository.apache.org/#stagingRepositories) and click `Release` to release.
+Find staging repo on [https://repository.apache.org/#stagingRepositories](https://repository.apache.org/#stagingRepositories).
+
+- If not closed, click `close` first to close.
+- Click `release` for official release.
+
+> If an error is reported in the `close` stage: `No public key: Key with id: (xxx) was not able to be located on`.
+
+> You can execute `gpg --keyserver hkp://keyserver.ubuntu.com --send-keys xxx` and then close again. xxx can be viewed through `gpg -k`.
 
 ### Prepare the release note
 

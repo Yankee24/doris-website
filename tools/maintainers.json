@@ -1,0 +1,13 @@
+{
+    "paths":[
+      {
+        "path":"docs/*",
+         "maintainers": [
+          "luzhijing",
+          "maruyue",
+          "morningman",
+          "wangtianyi2004"
+         ]
+      }
+    ] 
+  }

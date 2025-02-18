@@ -1,76 +1,97 @@
 name: Cron Deploy
 
-on: 
-  schedule:
-    - cron: '0 1 * * *'
-
+on:
+    schedule:
+        - cron: '0 * * * *' # Runs every hour.
+permissions: write-all
 jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    environment: Production
-    steps:
-    - name: Checkout
-      uses: actions/checkout@master
-      with:
-          persist-credentials: false
-          submodules: recursive
+    build-and-deploy:
+        runs-on: ubuntu-latest
+        environment: Production
+        steps:
+            - name: Checkout
+              uses: actions/checkout@master
+              with:
+                  persist-credentials: false
+                  submodules: recursive
 
-    - name: Use Node.js
-      uses: actions/setup-node@v1
-      with:
-        node-version: 16.14.0
+            - name: Add Chinese Fonts
+              run: |
+                  sudo apt-get install ttf-mscorefonts-installer
+                  sudo apt-get install fontconfig
+                  fc-list :lang=zh
+                  ls -lh /usr/share/fonts/
+                  cp -rf ./static/fonts/* /usr/share/fonts/
+                  mkfontscale
+                  mkfontdir
+                  fc-cache
+                  fc-list :lang=zh
+                  
+            - name: Use Node.js
+              uses: actions/setup-node@v3
+              with:
+                  node-version: 20
 
-    - name: Build
-      run: |
-        git clone https://github.com/apache/doris.git
-        export BRANCH=master
-        mkdir versioned_docs/version-dev/
-        cp -R doris/docs/en/docs/* versioned_docs/version-dev/
-        cp -R doris/docs/sidebars.json versioned_sidebars/version-dev-sidebars.json
-        mkdir i18n/zh-CN/docusaurus-plugin-content-docs/version-dev
-        cp -R doris/docs/zh-CN/docs/* i18n/zh-CN/docusaurus-plugin-content-docs/version-dev/
-        cp -R doris/docs/dev.json i18n/zh-CN/docusaurus-plugin-content-docs/version-dev.json
+            - name: Build
+              run: |
+                  npm install -g yarn
+                  yarn cache clean
+                  export NODE_OPTIONS=--max-old-space-size=8192
+                  yarn
+                  node ./scripts/update_github_info.js
+                  yarn build
+                  touch build/.dummy
+                  cp .asf-site.yaml ./build/.asf.yaml
+                  cp versions.json ./build/
+                  ls build
+                  export DORIS_COMMIT=`git rev-parse HEAD`
 
-        cp -R doris/docs/images static/
-        npm install -g yarn
-        yarn cache clean
-        yarn && yarn build
-        touch build/.dummy
-        cp .asf-site.yaml ./build/.asf.yaml
-        cp versions.json ./build/
-        ls build
-        export DORIS_COMMIT=`git rev-parse HEAD`
+            #     - name: Generate PDF
+            #       run: |
+            #         npx vitpress-generate-pdf --initialDocURLs="https://doris.apache.org/docs/dev/get-starting/" --paginationSelector=".pagination-nav__link--next" --contentSelector="article" --coverImage="https://cdn.selectdb.com/static/doris_logo_512_4903556647.png" --coverTitle="Apache Doris Docs (English)" --outputPDFFilename="Apache Doris Docs (English).pdf" --tocOnlyH1=true
+            #         npx vitpress-generate-pdf --initialDocURLs="https://doris.apache.org/zh-CN/docs/dev/get-starting/" --paginationSelector=".pagination-nav__link--next" --contentSelector="article" --coverImage="https://cdn.selectdb.com/static/doris_logo_512_4903556647.png" --coverTitle="Apache Doris Docs (中文)" --outputPDFFilename="Apache Doris Docs (中文).pdf" --tocOnlyH1=true
+            #         mkdir -p ./build/assets/files/
+            #         cp *.pdf ./build/assets/files/
+            #         ls ./build/assets/files/
 
-    - name: Upload files to OSS
-      uses: ./.github/actions/aliyun-oss-website-action
-      with:
-          accessKeyId: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
-          accessKeySecret: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
-          bucket: ${{ secrets.ALIYUN_OSS_BUCKET }}
-          # use your own endpoint
-          endpoint: ${{ secrets.ALIYUN_OSS_ENDPOINT }}
-          folder: build
+            - name: Upload files to OSS
+              uses: ./.github/actions/aliyun-oss-website-action
+              with:
+                  accessKeyId: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+                  accessKeySecret: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+                  bucket: ${{ secrets.ALIYUN_OSS_BUCKET }}
+                  # use your own endpoint
+                  endpoint: ${{ secrets.ALIYUN_OSS_ENDPOINT }}
+                  folder: build
+                  onlyUpload: true
+                  otherCacheControl: 0
+                  skipSetting: true
 
-    - name: Deploy Website
-      if: ${{ github.event.inputs.branch == 'master' }}
-      uses: peaceiris/actions-gh-pages@v3
-      with:
-        github_token: ${{ github.token }}
-        publish_branch: asf-site
-        publish_dir: ./build
-        destination_dir: ./
-        user_name: 'github-actions[bot]'
-        user_email: 'github-actions[bot]@users.noreply.github.com'
-        commit_message: 'Automated deployment with doris branch ${{ github.event.inputs.branch }}@${{ env.DORIS_COMMIT }}'
+            - name: Remove pdf
+              run: rm -rf ./build/assets/files/*.pdf
 
-    - name: Deploy Branch
-      if: ${{ github.event.inputs.branch != 'master' }}
-      uses: peaceiris/actions-gh-pages@v3
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_branch: asf-site
-        publish_dir: ./build
-        destination_dir: ${{ github.event.inputs.branch }}
-        user_name: 'github-actions[bot]'
-        user_email: 'github-actions[bot]@users.noreply.github.com'
-        commit_message: 'Automated deployment with doris branch ${{ github.event.inputs.branch }}@${{ env.DORIS_COMMIT }}'
+            - name: Deploy Website
+              if: ${{ github.event.inputs.branch == 'master' }}
+              uses: peaceiris/actions-gh-pages@v3
+              with:
+                  github_token: ${{ github.token }}
+                  publish_branch: asf-site
+                  publish_dir: ./build
+                  force_orphan: true
+                  destination_dir: ./
+                  user_name: 'github-actions[bot]'
+                  user_email: 'github-actions[bot]@users.noreply.github.com'
+                  commit_message: 'Automated deployment with doris branch ${{ github.event.inputs.branch }}@${{ env.DORIS_COMMIT }}'
+
+            - name: Deploy Branch
+              if: ${{ github.event.inputs.branch != 'master' }}
+              uses: peaceiris/actions-gh-pages@v3
+              with:
+                  github_token: ${{ secrets.GITHUB_TOKEN }}
+                  publish_branch: asf-site
+                  publish_dir: ./build
+                  force_orphan: true
+                  destination_dir: ${{ github.event.inputs.branch }}
+                  user_name: 'github-actions[bot]'
+                  user_email: 'github-actions[bot]@users.noreply.github.com'
+                  commit_message: 'Automated deployment with doris branch ${{ github.event.inputs.branch }}@${{ env.DORIS_COMMIT }}'

@@ -1,0 +1,20 @@
+{
+    "version": "0.2",
+    "ignorePaths": [],
+    "dictionaryDefinitions": [],
+    "dictionaries": [],
+    "words": [
+        "Cascader",
+        "colocation",
+        "lakehouse",
+        "Lakehouse",
+        "Linkedin",
+        "Moka",
+        "releasenotes",
+        "swiper",
+        "Trino",
+        "Velo"
+    ],
+    "ignoreWords": [],
+    "import": []
+}

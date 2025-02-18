@@ -1,12 +1,14 @@
 ---
 {
-    'title': '[Release Note] Apache Doris(Incubating) 0.15.0 Release',
-    'summary': '[Release Note] Apache Doris(Incubating) 0.15.0 Release',
+    'title': 'Apache Doris(Incubating) annoucned 0.15.0 release',
+    'description': “Dear Community, we are pleased to announce the release of Apache Doris(Incubating) on November 29, 2021! Nearly 700 optimizations and fixes have been submitted by 99 contributors to Apache Doris, and we'd like to express our sincere gratitude to all of them!”,
     'date': '2021-11-29',
-    'author': 'Luzhijing',
+    'author': 'Apache Doris',
     'tags': ['Release Notes'],
+    "image": '/images/release-notes.png'
 }
 ---
+
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -63,7 +65,7 @@ It can be enabled via the session variable `set enable_cost_based_join_reorder=t
 * Support Flink-Doris-Connector.
 * Support for DataX doriswriter plugin.
 * Spark-Doris-Connector support for data writing to Doris.
- 
+
 ## Feature Optimization 
 
 ### Query

@@ -1,12 +1,34 @@
-// @ts-check
-// Note: type annotations allow type checking and IDEs autocompletion
-// @ts-ignore
-const versions = require('./versions.json');
-const lightCodeTheme = require('prism-react-renderer/themes/github');
-const showAllVersions = false;
-const { ssrTemplate } = require('./config/ssrTemplate');
-const customDocusaurusPlugin = require('./config/custom-docusaurus-plugin');
+const themes = require('prism-react-renderer').themes;
 const versionsPlugin = require('./config/versions-plugin');
+const VERSIONS = require('./versions.json');
+const { markdownBoldPlugin } = require('./config/markdown-bold-plugin');
+const lightCodeTheme = themes.dracula;
+
+const logoImg = '/images/logo.svg';
+
+function getDocsVersions() {
+    const result = {};
+    VERSIONS.map(version => {
+        if (version === 'current') {
+            result[version] = {
+                label: 'Dev',
+                path: 'dev',
+                banner: 'unreleased',
+                // badge: false,
+            };
+        } else {
+            result[version] = {
+                banner: 'none',
+                badge: false,
+            };
+        }
+    });
+    return result;
+}
+
+function getLatestVersion() {
+    return VERSIONS.includes('2.1') ? '2.1' : VERSIONS[0];
+}
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
@@ -18,27 +40,42 @@ const config = {
     onBrokenLinks: 'ignore',
     onBrokenMarkdownLinks: 'ignore',
     favicon: 'images/favicon.ico',
+    organizationName: 'Apache',
+    markdown: {
+        format: 'detect',
+    },
     i18n: {
         defaultLocale: 'en',
         locales: ['en', 'zh-CN'],
         localeConfigs: {
             en: {
-                label: 'EN',
+                label: 'English',
+                htmlLang: 'en-US',
             },
             'zh-CN': {
                 label: '中文',
+                htmlLang: 'zh-Hans-CN',
             },
         },
     },
-    // scripts: ['/js/redirect.js'],
+    scripts: ['/js/custom-script.js'],
     stylesheets: [
-        'https://fonts.googleapis.com/css?family=Montserrat:500',
-        'https://fonts.googleapis.com/css?family=Noto+Sans+SC:400',
+        // 'https://cdn-font.hyperos.mi.com/font/css?family=MiSans:100,200,300,400,450,500,600,650,700,900:Chinese_Simplify,Latin&display=swap',
+        // 'https://cdn-font.hyperos.mi.com/font/css?family=MiSans_Latin:100,200,300,400,450,500,600,650,700,900:Latin&display=swap',
+        // 'https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap',
+        // 'https://fonts.googleapis.com',
+        // 'https://fonts.gstatic.com',
+        // 'https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Noto+Sans:ital,wght@0,100..900;1,100..900&display=swap'
     ],
-    organizationName: 'doris', // Usually your GitHub org/user name.
-    projectName: 'doris', // Usually your repo name.
+    projectName: 'apache/doris-website', // Usually your repo name.
+    customFields: {},
+    future: {
+        experimental_faster: true,
+    },
     plugins: [
         'docusaurus-plugin-sass',
+        'docusaurus-plugin-matomo',
+        // Use custom blog plugin
         versionsPlugin,
         [
             'content-docs',
@@ -50,63 +87,41 @@ const config = {
                 sidebarPath: require.resolve('./sidebarsCommunity.json'),
             }),
         ],
-        process.env.NODE_ENV === 'development' ? null : customDocusaurusPlugin,
-        [
-            '@docusaurus/plugin-pwa',
-            {
-                debug: false,
-                offlineModeActivationStrategies: ['appInstalled', 'standalone', 'queryString', 'mobile'],
-                injectManifestConfig: {
-                    globPatterns: ['**/*.{json,pdf,docx,xlsx,html,css,js,png,svg,ico,jpg,jpeg}'],
+        async function tailwindcssPlugin(context, options) {
+            return {
+                name: 'docusaurus-tailwindcss',
+                configurePostCss(postcssOptions) {
+                    // Appends TailwindCSS and AutoPrefixer
+                    postcssOptions.plugins.push(require('tailwindcss'));
+                    postcssOptions.plugins.push(require('autoprefixer'));
+                    return postcssOptions;
                 },
-                pwaHead: [
+            };
+        },
+        [
+            '@docusaurus/plugin-client-redirects',
+            {
+                fromExtensions: ['html', 'htm'],
+                redirects: [
+                    // /docs/oldDoc -> /docs/newDoc
                     {
-                        tagName: 'link',
-                        rel: 'icon',
-                        href: '/images/logo-only.png',
+                        from: '/docs/dev/summary/basic-summary',
+                        to: '/docs/gettingStarted/quick-start',
                     },
                     {
-                        tagName: 'link',
-                        rel: 'manifest',
-                        href: '/manifest.json',
-                    },
-                    {
-                        tagName: 'meta',
-                        name: 'theme-color',
-                        content: '#FFFFFF',
-                    },
-                    {
-                        tagName: 'meta',
-                        name: 'apple-mobile-web-app-capable',
-                        content: 'yes',
-                    },
-                    {
-                        tagName: 'meta',
-                        name: 'apple-mobile-web-app-status-bar-style',
-                        content: '#000',
-                    },
-                    {
-                        tagName: 'link',
-                        rel: 'apple-touch-icon',
-                        href: '/img/docusaurus.png',
-                    },
-                    {
-                        tagName: 'link',
-                        rel: 'mask-icon',
-                        href: '/img/docusaurus.svg',
-                        color: 'rgb(37, 194, 160)',
-                    },
-                    {
-                        tagName: 'meta',
-                        name: 'msapplication-TileImage',
-                        content: '/img/docusaurus.png',
-                    },
-                    {
-                        tagName: 'meta',
-                        name: 'msapplication-TileColor',
-                        content: '#000',
+                        from: '/docs/dev/get-starting/',
+                        to: '/docs/gettingStarted/quick-start',
                     },
                 ],
+                createRedirects(existingPath) {
+                    if (existingPath.includes('/gettingStarted/what-is-apache-doris')) {
+                        // Redirect from /gettingStarted/what-is-new to /gettingStarted/what-is-apache-doris
+                        return [
+                            existingPath.replace('/gettingStarted/what-is-apache-doris', '/gettingStarted/what-is-new'),
+                        ];
+                    }
+                    return undefined; // Return a falsy value: no redirect created
+                },
             },
         ],
     ],
@@ -116,45 +131,46 @@ const config = {
             /** @type {import('@docusaurus/preset-classic').Options} */
             ({
                 docs: {
-                    lastVersion: 'current',
-                    versions: {
-                        current: {
-                            label: '1.1',
-                            path: '',
-                        },
-                        0.15: {
-                            banner: 'none',
-                        },
-                        dev: {
-                            banner: 'none',
-                        },
-                    },
+                    lastVersion: getLatestVersion(),
+                    versions: getDocsVersions(),
                     sidebarPath: require.resolve('./sidebars.json'),
-                    onlyIncludeVersions:
-                        process.env.NODE_ENV === 'development' && !showAllVersions
-                            ? ['current']
-                            : ['current', ...versions],
-                    editUrl: ({ locale, versionDocsDirPath, docPath }) => {
-                        if (versionDocsDirPath === 'versioned_docs/version-dev') {
-                            return `https://github.com/apache/doris/edit/master/docs/${locale}/docs/${docPath}`;
-                        }
-                    },
+                    // editUrl: ({ locale, versionDocsDirPath, docPath }) => {
+                    //     return `https://github.com/apache/doris-website/edit/master/docs/${locale}/docs/${docPath}`;
+                    //     // if (versionDocsDirPath === 'versioned_docs/version-dev') {
+                    //     //     return `https://github.com/apache/doris-website/edit/master/docs/${locale}/docs/${docPath}`;
+                    //     // }
+                    // },
                     showLastUpdateAuthor: false,
                     showLastUpdateTime: false,
+                    remarkPlugins: [markdownBoldPlugin],
                 },
                 blog: {
-                    blogTitle: 'Blog',
-                    blogDescription: 'Apache Doris Blog',
+                    blogTitle: 'Apache Doris - Blog | Latest news and events ',
+                    blogDescription:
+                        'Explore how Doris empower lakehouse, adhoc analysis, customer-facing analysis and various scenarios',
                     postsPerPage: 'ALL',
                     blogSidebarCount: 0,
                     showReadingTime: false,
+                    onUntruncatedBlogPosts: 'ignore',
+                    onInlineAuthors: 'ignore',
                 },
                 theme: {
                     customCss: require.resolve('./src/scss/custom.scss'),
                 },
-                gtag: {
-                    trackingID: 'G-DT7W9E9722',
-                    anonymizeIP: true,
+                sitemap: {
+                    changefreq: 'weekly',
+                    priority: 0.5,
+                    filename: 'sitemap.xml',
+                    createSitemapItems: async params => {
+                        const { defaultCreateSitemapItems, ...rest } = params;
+                        const items = await defaultCreateSitemapItems(rest);
+                        for (let item of items) {
+                            if (item.url.includes('docs/1.2')) {
+                                item.priority = 0.2;
+                            }
+                        }
+                        return items;
+                    },
                 },
             }),
         ],
@@ -168,46 +184,77 @@ const config = {
                 highlightSearchTermsOnTargetPage: true,
                 // indexPages: true,
                 indexDocs: true,
+                // docsRouteBasePath: '/docs',
                 indexBlog: false,
                 explicitSearchResultPath: true,
+                searchBarShortcut: true,
+                searchBarShortcutHint: true,
+                searchResultLimits: 100,
             },
         ],
     ],
     themeConfig:
         /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
         ({
+            matomo: {
+                matomoUrl: 'https://analytics.apache.org/',
+                siteId: '43',
+                phpLoader: 'matomo.php',
+                jsLoader: 'matomo.js',
+            },
+            announcementBar: {
+                id: 'support_us',
+                content: `<a href="https://github.com/apache/doris" target="_blank" style="display: flex; width: 100%; align-items: center; justify-content: center; margin-left: 4px; text-decoration: none; color: white">Do you ❤️ Doris? Give us a 🌟 on GitHub 
+                <img style="width: 1.2rem; height: 1.2rem; margin-left: 0.4rem;" src="/images/github-white-icon.svg">
+                    </a>`,
+                backgroundColor: '#3C2FD4',
+                textColor: '#FFFFFF',
+                // isCloseable: false,
+            },
             navbar: {
                 title: '',
                 logo: {
-                    alt: 'Doris',
-                    src: 'https://cdn-tencent.selectdb.com/images/logo.svg',
+                    alt: 'Apache Doris',
+                    src: logoImg,
                 },
                 items: [
-                    { to: '/', label: 'Home', position: 'left', exact: true },
+                    // { to: '/', label: 'Home', position: 'left', exact: true },
                     {
-                        type: 'doc',
                         position: 'left',
                         label: 'Docs',
-                        docId: 'summary/basic-summary',
-                        to: '/basic-summary',
+                        to: '/docs/gettingStarted/what-is-apache-doris',
+                        target: '_blank',
                     },
                     { to: '/blog', label: 'Blog', position: 'left' },
-                    {
-                        label: 'Community',
-                        type: 'doc',
-                        docId: 'team',
-                        position: 'left',
-                        docsPluginId: 'community',
-                    },
                     { to: '/users', label: 'Users', position: 'left' },
                     {
-                        type: 'docsVersionDropdown',
-                        position: 'right',
+                        label: 'Discussions',
+                        to: 'https://github.com/apache/doris/discussions',
+                        position: 'left',
                     },
                     {
-                        type: 'localeDropdown',
-                        position: 'right',
+                        label: 'Ecosystem',
+                        to: '/ecosystem/cluster-management',
+                        position: 'left',
                     },
+                    {
+                        label: 'Community',
+                        to: '/community/join-community',
+                        position: 'left',
+                    },
+                    // {
+                    //     type: 'search',
+                    //     position: 'right',
+                    //     className: 'docs-search',
+                    // },
+                    // {
+                    //     type: 'localeDropdown',
+                    //     position: 'right',
+                    // },
+                    // {
+                    //     type: 'docsVersionDropdown',
+                    //     position: 'right',
+                    // },
                     // {
                     //     href: 'https://github.com/apache/doris',
                     //     className: 'header-right-button-github',
@@ -222,21 +269,106 @@ const config = {
                     },
                 ],
             },
-            footer: {
-                links: [
+            docNavbarZH: {
+                title: '',
+                logo: {
+                    alt: 'Apache Doris',
+                    src: logoImg,
+                },
+                items: [
                     {
-                        title: 'Resource',
-                        items: [
+                        type: 'search',
+                        position: 'left',
+                        className: 'docs-search',
+                    },
+                    {
+                        type: 'localeDropdown',
+                        position: 'right',
+                    },
+                    {
+                        type: 'docsVersionDropdown',
+                        position: 'right',
+                        dropdownItemsAfter: [
                             {
-                                label: 'Download',
-                                href: '/download',
-                            },
-                            {
-                                label: 'Docs',
-                                href: '/learning',
+                                label: '归档文档',
+                                to: `/zh-CN/archive-docs`,
                             },
                         ],
                     },
+                ],
+            },
+            docNavbarEN: {
+                title: '',
+                logo: {
+                    alt: 'Apache Doris',
+                    src: logoImg,
+                },
+                items: [
+                    {
+                        type: 'search',
+                        position: 'left',
+                        className: 'docs-search',
+                    },
+                    {
+                        type: 'localeDropdown',
+                        position: 'right',
+                    },
+                    {
+                        type: 'docsVersionDropdown',
+                        position: 'right',
+                        dropdownItemsAfter: [
+                            {
+                                label: 'Archived',
+                                to: `/archive-docs`,
+                            },
+                        ],
+                    },
+                ],
+            },
+            communityNavbar: {
+                title: '',
+                logo: {
+                    alt: 'Apache Doris',
+                    src: logoImg,
+                },
+                items: [
+                    {
+                        position: 'left',
+                        label: 'Docs',
+                        to: '/docs/gettingStarted/what-is-apache-doris',
+                        target: '_blank',
+                    },
+                    { to: '/blog', label: 'Blog', position: 'left' },
+                    { to: '/users', label: 'Users', position: 'left' },
+                    {
+                        label: 'Discussions',
+                        to: 'https://github.com/apache/doris/discussions',
+                        position: 'left',
+                    },
+                    {
+                        label: 'Ecosystem',
+                        to: '/ecosystem/cluster-management',
+                        position: 'left',
+                    },
+                    {
+                        label: 'Community',
+                        to: '/community/join-community',
+                        position: 'left',
+                    },
+                    {
+                        href: '/download',
+                        className: 'header-right-button-primary navbar-download-mobile',
+                        label: 'Download',
+                        position: 'right',
+                    },
+                    {
+                        type: 'localeDropdown',
+                        position: 'right',
+                    },
+                ],
+            },
+            footer: {
+                links: [
                     {
                         title: 'ASF',
                         items: [
@@ -261,8 +393,66 @@ const config = {
                                 href: 'https://privacy.apache.org/policies/privacy-policy-public.html',
                             },
                             {
+                                label: 'Security',
+                                href: 'https://www.apache.org/security/',
+                            },
+                            {
                                 label: 'Thanks',
                                 href: 'https://www.apache.org/foundation/thanks.html',
+                            },
+                        ],
+                    },
+                    {
+                        title: 'Resources',
+                        items: [
+                            {
+                                label: 'Download',
+                                href: '/download',
+                            },
+                            // {
+                            //     label: 'Docs',
+                            //     href: '/docs/get-starting/quick-start',
+                            // },
+                            {
+                                label: 'Blog',
+                                href: '/blog',
+                            },
+                            {
+                                label: 'Ecosystem',
+                                href: '/ecosystem/cluster-management',
+                            },
+                            {
+                                label: 'Users',
+                                href: '/users',
+                            },
+                            {
+                                label: 'Discussions',
+                                href: 'https://github.com/apache/doris/discussions',
+                            },
+                        ],
+                    },
+                    {
+                        title: 'Community',
+                        items: [
+                            {
+                                label: 'How to contribute',
+                                href: '/community/how-to-contribute/',
+                            },
+                            {
+                                label: 'Source code',
+                                href: 'https://github.com/apache/doris/',
+                            },
+                            {
+                                label: 'Doris team',
+                                href: '/community/team',
+                            },
+                            {
+                                label: 'Roadmap',
+                                href: 'https://github.com/apache/doris/issues/30669',
+                            },
+                            {
+                                label: 'Improvement proposal',
+                                href: 'https://cwiki.apache.org/confluence/display/DORIS/Doris+Improvement+Proposals',
                             },
                         ],
                     },
@@ -291,9 +481,8 @@ const config = {
             //         content:
             //             'width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no',
             //     },
-            // ],
+            // ],s
         }),
-    ssrTemplate,
 };
 
 module.exports = config;

@@ -1,6 +1,6 @@
 ---
 {
-    "title": "Contributor Guide",
+    "title": "How to Become Contributor",
     "language": "en"
 }
 ---
@@ -24,7 +24,6 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Contributor Guide
 
 ## New Contributor Guidelines
 
@@ -32,19 +31,6 @@ under the License.
 
 If you haven’t yet, subscribe to {dev,commits}@doris.apache.org mailing lists.
 Commits mailing list is especially important because all of Github Issue, Pull Request and build notifications are sent there.
-
-### Subscribe to the private mailing list
-
-Subscribe to private@doris.apache.org by sending an email to private-subscribe@doris.apache.org.
-Keep in mind that this list is private and your subscription needs to be approved by a moderator.
-If you are PPMC, you can subscribe the mailing list through [Subscription Helper](https://whimsy.apache.org/committers/subscribe)
-
-### Link your ASF and Github account
-
-We use Github for managing issues and user contributions (pull requests).
-As such, you need to link your Github.com account with your ASF account using [Gitbox](https://gitbox.apache.org/setup/).
-This way you will get write access to [Doris](https://github.com/apache/doris) repository
-and you will be able to manage issues and pull request directly through our Github repository.
 
 ## Code Review Guidelines
 
@@ -88,5 +74,13 @@ and you will be able to manage issues and pull request directly through our Gith
 
 11. Select "squash and merge" to merge.
 
-12. When there is a disagreement about a modification, try to discuss the resolution. If the discussion doesn't work out, it can be resolved by a vote in private@doris.apache.org by the majority rules.
+12. When there is a disagreement about a modification, try to discuss the resolution. If the discussion doesn't work out, it can be resolved by a vote in dev@doris.apache.org by the majority rules.
+
+13. Adding External libraries
+
+Extra care should be taken when introducing external libraries. When adding a new library, the following factors should be considered:
+- What functionality does the new external library provide? Can the existing libraries provide this functionality (perhaps with some effort)?
+- Is the external library maintained by an active contributor community?
+- What are the licensing terms of the new library?
+- Are you adding the library to a core module? This will affect other parts of the Doris codebase. For example, in Java, if the new library introduces a large number of transitive dependencies, we may encounter unexpected class conflicts, which are difficult to discover through testing because they depend on the order in which libraries are loaded at runtime.
 

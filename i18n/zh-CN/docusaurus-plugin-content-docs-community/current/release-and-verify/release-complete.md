@@ -33,6 +33,8 @@ under the License.
 当正式发布投票成功后，先发[Result]邮件，然后就准备 release package。
 将之前在dev下发布的对应文件夹下的源码包、签名文件和hash文件拷贝到另一个目录 1.1.0，注意文件名字中不要rcxx (可以rename，但不要重新计算签名，hash可以重新计算，结果不会变)
 
+> 这一步仅PMC成员有权限操作。
+
 ```
 From:
 https://dist.apache.org/repos/dist/dev/doris/
@@ -97,7 +99,14 @@ refer to: <http://www.apache.org/dev/release-download-pages#closer>
 
 ### Maven
 
-在 [https://repository.apache.org/#stagingRepositories](https://repository.apache.org/#stagingRepositories) 中找到对应的 Staging Repo, 点击 `Release` 进行正式发布。
+在 [https://repository.apache.org/#stagingRepositories](https://repository.apache.org/#stagingRepositories) 中找到对应的 Staging Repo。
+
+- 如果没有 close，先点击 `close` 关闭。
+- 点击 `Release` 进行正式发布。
+
+> 如果 `close` 阶段报错：`No public key: Key with id: (xxx) was not able to be located on`。
+
+> 可以执行 `gpg --keyserver hkp://keyserver.ubuntu.com --send-keys xxx` 后再重新close，xxx 可以通过 `gpg -k` 查看。
 
 ### 准备 release note
 

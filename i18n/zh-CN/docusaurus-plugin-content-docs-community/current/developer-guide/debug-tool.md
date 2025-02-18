@@ -103,9 +103,15 @@ FE 是 Java 进程。这里只列举一下简单常用的 java 调试命令。
 
 对于内存的调试一般分为两个方面。一个是内存使用的总量是否合理，内存使用量过大一方面可能是由于系统存在内存泄露，另一方面可能是因为程序内存使用不当。其次就是是否存在内存越界、非法访问的问题，比如程序访问一个非法地址的内存，使用了未初始化内存等。对于内存方面的调试我们一般使用如下几种方式来进行问题追踪。
 
+Doris 1.2.1 及之前版本使用 TCMalloc，Doris 1.2.2 版本开始默认使用 Jemalloc，根据使用的 Doris 版本选择内存调试方法，如需切换 TCMalloc 可以这样编译 `USE_JEMALLOC=OFF sh build.sh --be`。
+
 #### 查看日志
 
-当发现内存使用量过大的时候，我们可以先查看be.out日志，看看是否有大内存申请。由于Doris当前使用的TCMalloc管理内存，那么遇到大内存申请时，都会将申请的堆栈打印到be.out文件中，一般的表现形式如下：
+当发现内存使用量过大的时候，我们可以先查看 BE 日志，看看是否有大内存申请。
+
+###### TCMalloc
+
+当使用 TCMalloc 时，遇到大内存申请会将申请的堆栈打印到be.out文件中，一般的表现形式如下：
 
 ```
 tcmalloc: large alloc 1396277248 bytes == 0x3f3488000 @  0x2af6f63 0x2c4095b 0x134d278 0x134bdcb 0x133d105 0x133d1d0 0x19930ed
@@ -125,16 +131,34 @@ $ addr2line -e lib/doris_be  0x2af6f63 0x2c4095b 0x134d278 0x134bdcb 0x133d105 0
 thread.cpp:?
 ```
 
+##### JEMALLOC
+
+Doris绝大多数的大内存申请都使用 Allocator，比如 HashTable、数据序列化，这部分内存申请是预期中的，会被有效管理起来，除此之外的大内存申请不被预期，会将申请的堆栈打印到 be.INFO 文件中，这通常用于调试，一般的表现形式如下：
+```
+MemHook alloc large memory: 8.2GB, stacktrace:
+Alloc Stacktrace:
+    @     0x55a6a5cf6b4d  doris::ThreadMemTrackerMgr::consume()
+    @     0x55a6a5cf99bf  malloc
+    @     0x55a6ae0caf98  operator new()
+    @     0x55a6a57cb013  doris::segment_v2::PageIO::read_and_decompress_page()
+    @     0x55a6a57719c0  doris::segment_v2::ColumnReader::read_page()
+    ……
+```
+
 #### HEAP PROFILE
+
+##### TCMalloc
 
 有时内存的申请并不是大内存的申请导致，而是通过小内存不断的堆积导致的。那么就没有办法通过查看日志定位到具体的申请信息，那么就需要通过其他方式来获得信息。
 
 这个时候我们可以利用TCMalloc的[HEAP PROFILE](https://gperftools.github.io/gperftools/heapprofile.html)的功能。如果设置了HEAPPROFILE功能，那么我们可以获得进程整体的内存申请使用情况。使用方式是在启动Doris BE前设置`HEAPPROFILE`环境变量。比如：
 
 ```
-export HEAPPROFILE=/tmp/doris_be.hprof
+export TCMALLOC_SAMPLE_PARAMETER=64000 HEAP_PROFILE_ALLOCATION_INTERVAL=-1 HEAP_PROFILE_INUSE_INTERVAL=-1  HEAP_PROFILE_TIME_INTERVAL=5 HEAPPROFILE=/tmp/doris_be.hprof
 ./bin/start_be.sh --daemon
 ```
+
+> 需要注意，HEAPPROFILE 需要是绝对路径，且已经存在。
 
 这样，当满足HEAPPROFILE的dump条件时，就会将内存的整体使用情况写到指定路径的文件中。后续我们就可以通过使用`pprof`工具来对输出的内容进行分析。
 
@@ -172,7 +196,7 @@ pprof --svg lib/doris_be /tmp/doris_be.hprof.0012.heap > heap.svg
 
 **注意：开启这个选项是要影响程序的执行性能的，请慎重对线上的实例开启**
 
-#### pprof remote server
+###### pprof remote server
 
 HEAP PROFILE虽然能够获得全部的内存使用信息，但是也有比较受限的地方。1. 需要重启BE进行。2. 需要一直开启这个命令，导致对整个进程的性能造成影响。
 
@@ -198,6 +222,127 @@ Total: 1296.4 MB
 ```
 
 这个命令的输出与HEAP PROFILE的输出及查看方式一样，这里就不再详细说明。这个命令只有在执行的过程中才会开启统计，相比HEAP PROFILE对于进程性能的影响有限。
+
+##### JEMALLOC
+
+有关 Heap Profile 的原理解析参考 [Heap Profiling 原理解析](https://cn.pingcap.com/blog/an-explanation-of-the-heap-profiling-principle/)，需要注意的是 Heap Profile 记录的是虚拟内存
+
+支持实时和定期两种方式 Dump Heap Profile，然后使用 `jeprof` 解析 Heap Profile。
+
+###### 1. 实时 Heap Dump
+
+将 `be.conf` 中 `JEMALLOC_CONF` 的 `prof:false` 修改为 `prof:true` 并重启BE，然后使用jemalloc heap dump http接口，在对应的BE机器上生成heap dump文件。
+
+```shell
+curl http://be_host:be_webport/jeheap/dump
+```
+
+heap dump文件所在目录可以在 ``be.conf`` 中通过``jeprofile_dir``变量进行配置，默认为``${DORIS_HOME}/log``
+
+默认采样间隔为 512K，这通常只会有 10% 的内存被heap dump记录，对性能的影响通常小于 10%，可以修改 `be.conf` 中 `JEMALLOC_CONF` 的 `lg_prof_sample`，默认为 `19` (2^19 B = 512K)，减小 `lg_prof_sample` 可以更频繁的采样使 heap profile 接近真实内存，但这会带来更大的性能损耗。
+
+如果你在做性能测试，保持 `prof:false` 来避免 heap dump 的性能损耗。
+
+###### 2. 定期 Heap Dump
+
+首先将 `be.conf` 中 `JEMALLOC_CONF` 的 `prof:false` 修改为 `prof:true`，heap dump文件所在目录默认为 `${DORIS_HOME}/log`, 文件名前缀是 `be.conf` 中的 `JEMALLOC_PROF_PRFIX`，默认是 `jemalloc_heap_profile_`。
+
+> 在 Doris 2.1.6 之前，`JEMALLOC_PROF_PRFIX` 为空，需要修改为任意值作为 profile 文件名
+
+1. 内存累计申请一定值时dump:
+
+   将 `be.conf` 中 `JEMALLOC_CONF` 的 `lg_prof_interval` 修改为 34，此时内存累计申请 16GB (2^35 B = 16GB) 时 dump 一次 profile，可以修改为任意值来调整dump间隔。
+
+> 在 Doris 2.1.6 之前，`lg_prof_interval` 默认就是32。
+
+2. 内存每次达到新高时dump:
+
+   将 `be.conf` 中 `JEMALLOC_CONF` 的 `prof_gdump` 修改为 `true` 并重启BE。
+
+3. 程序退出时dump, 并检测内存泄漏:
+
+   将 `be.conf` 中 `JEMALLOC_CONF` 的 `prof_leak` 和 `prof_final` 修改为 `true` 并重启BE。
+
+4. dump内存累计值(growth)，而不是实时值:
+
+   将 `be.conf` 中 `JEMALLOC_CONF` 的 `prof_accum` 修改为 `true` 并重启BE。
+   使用 `jeprof --alloc_space` 展示 heap dump 累计值。
+
+##### 3. `jeprof` 解析 Heap Profile
+
+使用 `jeprof` 解析上面 Dump 的 Heap Profile，如果进程内存太大，解析过程可能需要几分钟，请耐心等待。若系统没有 `jeprof` 命令，可以将 `doris/tools` 目录下的 `jeprof` 这个二进制打包后上传到 Heap Dump 的服务器。
+
+```
+需要 addr2line 版本为 2.35.2 及以上, 见下面的 QA-1
+尽可能让 Heap Dump 和执行 `jeprof` 解析 Heap Profile 在同一台服务器上，见下面的 QA-2
+```
+
+1. 分析单个 Heap Dump 文件
+
+```shell
+   jeprof --dot lib/doris_be heap_dump_file_1
+   ```
+
+   执行完上述命令，终端中会输出dot语法的图，将其贴到[在线dot绘图网站](http://www.webgraphviz.com/)，生成内存分配图，然后进行分析。
+
+   如果服务器方便传输文件，也可以通过如下命令直接生成调用关系图 result.pdf 文件传输到本地后进行查看，需要安装绘图所需的依赖项。
+
+```shell
+   yum install ghostscript graphviz
+   jeprof --pdf lib/doris_be heap_dump_file_1 > result.pdf
+   ```
+
+2.  分析两个 Heap Dump 文件的diff
+
+```shell
+   jeprof --dot lib/doris_be --base=heap_dump_file_1 heap_dump_file_2
+   ```
+
+   通过在一段时间内多次运行上述命令可以生成多个 heap 文件，可以选取较早时间的 heap 文件作为 baseline，与较晚时间的 heap 文件对比分析它们的diff，生成调用关系图的方法同上。
+
+##### 4. QA
+
+1. 运行 jeprof 后出现很多错误: `addr2line: Dwarf Error: found dwarf version xxx, this reader only handles version xxx`.
+
+GCC 11 之后默认使用 DWARF-v5 ，这要求Binutils 2.35.2 及以上，Doris Ldb_toolchain 用了 GCC 11。see: https://gcc.gnu.org/gcc-11/changes.html。
+
+替换 addr2line 到 2.35.2，参考：
+```
+// 下载 addr2line 源码
+wget https://ftp.gnu.org/gnu/binutils/binutils-2.35.tar.bz2
+
+// 安装依赖项，如果需要
+yum install make gcc gcc-c++ binutils
+
+// 编译&安装 addr2line
+tar -xvf binutils-2.35.tar.bz2
+cd binutils-2.35
+./configure --prefix=/usr/local
+make
+make install
+
+// 验证
+addr2line -h
+
+// 替换 addr2line
+chmod +x addr2line
+mv /usr/bin/addr2line /usr/bin/addr2line.bak
+mv /bin/addr2line /bin/addr2line.bak
+cp addr2line /bin/addr2line
+cp addr2line /usr/bin/addr2line
+hash -r
+```
+注意，不能使用 addr2line 2.3.9, 这可能不兼容，导致内存一直增长。
+
+2. 运行 `jeprof` 后出现很多错误: `addr2line: DWARF error: invalid or unhandled FORM value: 0x25`，解析后的 Heap 栈都是代码的内存地址，而不是函数名称
+
+这是因为 Heap Dump 和执行 `jeprof` 解析 Heap Profile 不在同一台服务器上，导致 `jeprof` 使用符号表解析函数名称失败，尽可能在同一台机器上完成 Dump Heap 和 `jeprof` 解析的操作。
+
+3. 如果 Heap Dump 和执行 `jeprof` 解析 Heap Profile 在同一台服务器上，但解析后的 Heap 栈依然是代码的内存地址，而不是函数名称
+
+尝试在 Heap Dump 的机器上重新编译 Doris BE，也就是让编译和运行 Doris BE 在一台机器上，并在这台机器上 Heap Dump 和 `jeprof` 解析。
+
+上面的操作后，如果 Heap 栈依然是代码的内存地址，尝试 `USE_JEMALLOC=OFF ./build.sh --be` 编译使用 TCMalloc 的 Doris BE，然后参考上面的章节使用 TCMalloc Heap Profile 分析内存。
 
 #### LSAN
 

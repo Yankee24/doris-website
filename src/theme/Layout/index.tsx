@@ -1,16 +1,29 @@
-import React from 'react';
+import React, { useEffect, createContext, useContext, useState, useRef } from 'react';
+import { useLocation } from '@docusaurus/router';
 import clsx from 'clsx';
 import ErrorBoundary from '@docusaurus/ErrorBoundary';
-import { PageMetadata, ThemeClassNames, useKeyboardNavigation } from '@docusaurus/theme-common';
+import { PageMetadata, SkipToContentFallbackId, ThemeClassNames } from '@docusaurus/theme-common';
+import { useKeyboardNavigation } from '@docusaurus/theme-common/internal';
 import SkipToContent from '@theme/SkipToContent';
 import AnnouncementBar from '@theme/AnnouncementBar';
-import LayoutProviders from '@theme/LayoutProviders';
-import ErrorPageContent from '@theme/ErrorPageContent';
-import useScrollTop from '@site/src/hooks/scroll-top-hooks';
-import './styles.scss';
 import Navbar from '@theme/Navbar';
-import Footer from '../Footer';
-export default function Layout(props) {
+import Footer from '@theme/Footer';
+import LayoutProvider from '@theme/Layout/Provider';
+import ErrorPageContent from '@theme/ErrorPageContent';
+import NavbarSearch from '../Navbar/Search';
+import SearchBar from '@theme/SearchBar';
+import type { Props } from '@theme/Layout';
+import styles from './styles.module.css';
+import { useHistory } from '@docusaurus/router';
+
+interface DataType {
+    showSearchPageMobile: boolean;
+    setShowSearchPageMobile: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+export const DataContext = createContext<DataType>(null);
+
+export default function Layout(props: Props): JSX.Element {
     const {
         children,
         noFooter,
@@ -18,23 +31,73 @@ export default function Layout(props) {
         // Not really layout-related, but kept for convenience/retro-compatibility
         title,
         description,
-        isPage,
     } = props;
+    const history = useHistory();
+    const [showSearchPageMobile, setShowSearchPageMobile] = useState(false);
+    const searchPageDom = useRef<HTMLDivElement>(null);
+    const { hash } = useLocation();
     useKeyboardNavigation();
-    const { isTop } = useScrollTop(80);
+
+    useEffect(() => {
+        if (
+            history.location.pathname?.length > 1 &&
+            history.location.pathname[history.location.pathname.length - 1] === '/'
+        ) {
+            const params = location.href.split(history.location.pathname)[1];
+            history.replace(history.location.pathname.slice(0, -1) + params);
+        }
+    }, [history.location]);
+
+    useEffect(() => {
+        if (showSearchPageMobile) {
+            window.scroll(0, 0);
+            document.body.style.overflow = 'hidden';
+            searchPageDom.current.style.height = '100vh';
+        } else {
+            window.scroll(0, 0);
+            document.body.style.overflow = 'auto';
+        }
+    }, [showSearchPageMobile]);
+
+    useEffect(() => {
+        if (hash) {
+            try {
+                const decodeHash = decodeURIComponent(hash);
+                const targetElement = document.querySelector(decodeHash);
+                if (targetElement) {
+                    targetElement.scrollIntoView({ behavior: 'smooth' });
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+    }, [hash]);
 
     return (
-        <LayoutProviders>
-            <PageMetadata title={title} description={description} />
+        <DataContext.Provider value={{ showSearchPageMobile, setShowSearchPageMobile }}>
+            <LayoutProvider>
+                <PageMetadata title={title} description={description} />
 
-            <SkipToContent />
+                <SkipToContent />
+                <AnnouncementBar />
+                <Navbar />
+                {showSearchPageMobile ? (
+                    <div ref={searchPageDom}>
+                        <NavbarSearch>
+                            <SearchBar />
+                        </NavbarSearch>
+                    </div>
+                ) : null}
 
-            <AnnouncementBar />
-            <Navbar />
-            <div className={clsx(ThemeClassNames.wrapper.main, wrapperClassName, isPage ? 'has-margin' : '')}>
-                <ErrorBoundary fallback={params => <ErrorPageContent {...params} />}>{children}</ErrorBoundary>
-            </div>
-            {!noFooter && <Footer />}
-        </LayoutProviders>
+                <div
+                    id={SkipToContentFallbackId}
+                    className={clsx(ThemeClassNames.wrapper.main, styles.mainWrapper, wrapperClassName)}
+                >
+                    <ErrorBoundary fallback={params => <ErrorPageContent {...params} />}>{children}</ErrorBoundary>
+                </div>
+
+                {!noFooter && <Footer />}
+            </LayoutProvider>
+        </DataContext.Provider>
     );
 }
